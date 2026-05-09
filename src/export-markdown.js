@@ -1,108 +1,71 @@
 import { buildContexticReport, buildJsonExport as buildContexticJsonExport } from './contextic-report.js';
 
 export function buildDesignContextMarkdown(snapshot) {
-  const { meta, colors, typography, spacing, components, frictions, behavioralMapping, behavioralRecommendation } = snapshot;
+  const meta = snapshot.meta || {};
+  const colors = snapshot.colors || {};
+  const typography = snapshot.typography || {};
+  const spacing = snapshot.spacing || {};
+  const components = snapshot.components || {};
+  const frictions = snapshot.frictions || [];
+  const behavioralMapping = snapshot.behavioralMapping || [];
   const report = buildContexticReport(snapshot);
 
-  return `# Briefing técnico de diseño — Contextic
+  return `# design-context.md — Contextic
 
 Capturado desde: ${report.meta.sourceUrl}
 Título: ${report.screenSummary.pageTitle || 'Sin título'}
 Generado en: ${report.meta.generatedAt}
-Viewport: ${meta.viewport.width}x${meta.viewport.height}
+Viewport: ${meta.viewport?.width || 'unknown'}x${meta.viewport?.height || 'unknown'}
 
-## 1. Diagnóstico ejecutivo
+## Design System Snapshot
 
-### Tipo de pantalla
-- Tipo detectado: ${formatReportValue(report.screenSummary.detectedScreenType)}
-- Objetivo principal probable: ${formatReportValue(report.screenSummary.probableBusinessGoal)}
-- Acción de conversión principal: ${formatReportValue(report.screenSummary.primaryConversionAction)}
-- Nivel de madurez de la pantalla: ${inferMaturity(behavioralMapping)}
-- Riesgo principal de conversión: ${formatReportValue(report.screenSummary.mainConversionRisk)}
-
-### Lectura estratégica
-${buildStrategicReading(frictions, behavioralMapping)}
-
----
-
-## 2. Inventario técnico visual
-
-### Tokens detectados
-| Token | Valor observado | Uso | Consistencia | Riesgo |
+### Colors detected by frequency
+| Color | Count | Inferred role | Confidence | Observed use |
 |---|---:|---|---|---|
-${buildTokenRows(colors, typography, spacing)}
+${buildColorRows(colors)}
 
-### Patrones UI detectados
+### Typography detected
+| Font family | Size | Line height | Weight | Count | Probable use |
+|---|---:|---:|---:|---:|---|
+${buildTypographyRows(typography)}
+
+### Spacing, radius, shadows and borders
+| Token group | Recurrent values | Notes |
+|---|---|---|
+${buildDesignSystemTokenRows(spacing)}
+
+### CSS variables detected
+${buildCssVariableList(colors.cssVariables || [])}
+
+## Component Inventory
+
+| Component candidate | Instances | Variants inferred | Recommended states | Accessibility risk | Design system recommendation |
+|---|---:|---|---|---|---|
+${buildComponentInventoryRows(components)}
+
+### UI patterns observed
 ${buildPatternList(components, behavioralMapping)}
 
-### Componentes detectados
-- Botones: ${components.counts.buttons}
-- Enlaces: ${components.counts.links}
-- Inputs: ${components.counts.inputs}
-- Formularios: ${components.counts.forms}
-- Tarjetas: ${components.counts.cards}
-- Alerts/regiones live: ${components.counts.alerts}
-- Landmarks de navegación: ${components.counts.navigation}
-- Imágenes: ${components.counts.images}
+## UX Friction Notes
 
----
+${frictions.length ? frictions.map((friction, index) => formatFriction(friction, index + 1)).join('\n\n') : '- No se detectan fricciones UX heurísticas relevantes. Revisa manualmente antes de tomar decisiones de producto.'}
 
-## 3. Mapa behavioral de la pantalla actual
-
-| Bloque | Presente | Calidad | Evidencia | Fricción detectada | Severidad |
+### Behavioral block map
+| Block | Present | Quality | Evidence | Friction note | Severity |
 |---|---|---:|---|---|---:|
 ${behavioralMapping.map(formatBehavioralMapRow).join('\n')}
 
----
+## Implementation guidance
 
-## 4. Fricciones UX priorizadas
+${buildImplementationGuidance(snapshot).map(item => `- ${item}`).join('\n')}
 
-${frictions.length ? frictions.map((friction, index) => formatFriction(friction, index + 1)).join('\n\n') : '- No se detectan fricciones heurísticas relevantes. Revisa manualmente antes de tomar decisiones de producto.'}
-
----
-
-## 5. Propuesta de estructura behavioral recomendada
-
-### Orden recomendado de bloques
-${behavioralRecommendation.recommendedOrder.map((block, index) => `${index + 1}. ${block}`).join('\n')}
-
-> Ajusta el orden solo si la pantalla, el producto o el funnel lo justifican. Explica siempre el trade-off.
-
-### Sección propuesta por bloque
-
-${behavioralRecommendation.sections.map(formatRecommendedSection).join('\n\n')}
-
----
-
-## 6. Reglas de implementación
-
-### Componentización recomendada
-- Componentes base: Button, Link, Form field, Card, Section, Alert.
-- Componentes compuestos: Hero, CTA group, Benefits list, FAQ, Trust bar, Stepper, CTA band.
-- Variantes necesarias: primario, secundario, terciario, destructivo si aplica, disabled, loading, error y success.
-- Props mínimas: label, href/action, variant, size, icon, disabledReason, ariaLabel, helperText, errorText.
-- Estados: default, hover, focus, active, loading, disabled, success, error.
-- Breakpoints: revisar jerarquía de CTA y legibilidad en mobile.
-- Accesibilidad: contraste, focus visible, labels, orden semántico y mensajes de recuperación.
-
-### Governance de design system
-- Qué debe convertirse en patrón reutilizable: acciones, formularios, cards repetidas, FAQ, bloques de confianza y CTA contextual.
-- Qué debe mantenerse específico de la landing: claims de campaña, ilustraciones únicas y contenido temporal.
-- Qué naming usar: tokens semánticos por intención, no por apariencia puntual.
-- Qué tokens faltan: revisar color, spacing, radius y estados si aparecen valores no mapeados.
-- Qué inconsistencias deben corregirse: cualquier divergencia que afecte jerarquía, confianza o accionabilidad.
-
----
-
-## 7. Priorización
+## Prioritized follow-up
 
 | Prioridad | Cambio | Fricción resuelta | Impacto esperado | Esfuerzo | Dependencias |
 |---:|---|---|---|---|---|
 ${buildPrioritizationRows(frictions, behavioralMapping)}
 
----
-
-## 8. Métricas recomendadas
+## Recommended metrics
 
 - CTR del CTA principal.
 - Scroll depth por bloque behavioral.
@@ -115,9 +78,7 @@ ${buildPrioritizationRows(frictions, behavioralMapping)}
 - Ratio de usuarios que llegan a bloques de objeción.
 - Conversión final.
 
----
-
-## 9. Resumen accionable
+## Handoff summary
 
 ### Lo que funciona
 ${buildWhatWorks(behavioralMapping)}
@@ -137,38 +98,36 @@ export function buildJsonExport(snapshot) {
   return buildContexticJsonExport(snapshot);
 }
 
-export function buildGitHubIssueMarkdown(snapshot) {
-  const { meta, frictions, spacing, colors, components, behavioralMapping } = snapshot;
-  const topFrictions = frictions.slice(0, 5);
+export function buildGithubIssueExport(input = {}) {
+  const snapshot = looksLikeReport(input) ? {} : input;
+  const report = looksLikeReport(input) ? input : buildContexticReport(snapshot);
+  const evidence = buildGithubEvidence(snapshot, report);
+  const problem = buildGithubProblem(snapshot, report, evidence);
+  const suggestedFix = buildGithubSuggestedFix(snapshot, report, evidence);
+  const acceptanceCriteria = buildGithubAcceptanceCriteria(snapshot, report, evidence);
+  const implementationNotes = buildImplementationGuidance(snapshot).slice(0, 8);
 
-  return `# Deuda UI/UX detectada por Contextic
+  return `# UI/UX debt detected on current page
 
-URL: ${meta.url}
+## Problem
+${problem}
 
-## Problema
-Esta pantalla muestra posible deuda de sistema de diseño, consistencia UX y estructura behavioral que debería revisarse antes de implementar nuevos cambios.
+## Evidence
+${evidence.length ? evidence.map(item => `- ${item}`).join('\n') : '- No strong automated evidence was detected. Treat this issue as a conservative manual UI review task.'}
 
-## Evidencia
-- ${colors.totalUniqueColors} valores únicos de color detectados.
-- ${spacing.totalUniqueSpacingValues} valores únicos de espaciado detectados.
-- ${spacing.totalUniqueRadiusValues} valores únicos de radio detectados.
-- ${components.counts.buttons} botones/acciones detectados.
-- ${components.samples.unlabeledInputs.length} input(s) sin etiqueta accesible clara.
-- Bloques behavioral débiles: ${behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).map(block => block.label).join(', ') || 'ninguno detectado por heurística'}.
+## Suggested fix
+${suggestedFix}
 
-${topFrictions.length ? `## Hallazgos priorizados\n\n${topFrictions.map((friction, index) => formatFriction(friction, index + 1)).join('\n\n')}` : '## Hallazgos priorizados\n\nNo se detectan hallazgos heurísticos relevantes. Se recomienda revisión manual.'}
+## Acceptance criteria
+${acceptanceCriteria.map(item => `- [ ] ${item}`).join('\n')}
 
-## Solución sugerida
-Normalizar valores visuales alrededor del sistema existente, aclarar la jerarquía de acciones y reforzar la estructura behavioral What → Why → Why not → Who → How → Where → When según la evidencia real de la pantalla.
-
-## Criterios de aceptación
-- [ ] La propuesta de valor responde qué es y qué gana el usuario.
-- [ ] Hay una única acción primaria por bloque de decisión.
-- [ ] Los bloques de objeción reducen riesgo sin inventar garantías, urgencia ni prueba social.
-- [ ] Botones, inputs y tarjetas usan variantes y tokens gobernados.
-- [ ] Los inputs incluyen etiqueta, ayuda y estado de error cuando sea relevante.
-- [ ] Cada recomendación incluye evidencia, fricción resuelta, componente/patrón y métrica.
+## Notes for implementation
+${implementationNotes.map(item => `- ${item}`).join('\n')}
 `;
+}
+
+export function buildGitHubIssueMarkdown(snapshot) {
+  return buildGithubIssueExport(snapshot);
 }
 
 export function buildTokensSnapshot(snapshot) {
@@ -211,6 +170,286 @@ export function buildTokensSnapshot(snapshot) {
       }))
     }
   };
+}
+
+function buildColorRows(colors = {}) {
+  const rows = (colors.colors || []).slice(0, 12).map(color => {
+    const observedUse = color.sample ? `${color.sample.property} on ${color.sample.selector}` : 'unknown';
+    return `| ${color.value} | ${color.count} | ${color.suggestedRole || 'unknown'} | ${color.roleConfidence || roleConfidenceFromName(color.suggestedRole)} | ${escapePipes(observedUse)} |`;
+  });
+
+  return rows.join('\n') || '| unknown | 0 | unknown | unknown | No color evidence detected |';
+}
+
+function buildTypographyRows(typography = {}) {
+  const rows = (typography.typeStyles || []).slice(0, 10).map(style => {
+    const parsed = parseTypeStyle(style.value);
+    return `| ${escapePipes(parsed.fontFamily)} | ${parsed.fontSize} | ${parsed.lineHeight} | ${parsed.weight} | ${style.count} | ${inferTypographyUse(parsed)} |`;
+  });
+
+  return rows.join('\n') || '| unknown | unknown | unknown | unknown | 0 | No typography evidence detected |';
+}
+
+function buildDesignSystemTokenRows(spacing = {}) {
+  const spacingValues = formatTokenValues(spacing.spacingScale, 10);
+  const radiusValues = formatTokenValues(spacing.radii, 8);
+  const shadowValues = formatTokenValues(spacing.shadows, 4);
+  const borderValues = formatTokenValues(spacing.borders, 6);
+
+  return [
+    `| Spacing | ${spacingValues} | ${spacing.totalUniqueSpacingValues ? `${spacing.totalUniqueSpacingValues} unique spacing values detected.` : 'unknown'} |`,
+    `| Radius | ${radiusValues} | ${spacing.totalUniqueRadiusValues ? `${spacing.totalUniqueRadiusValues} unique radius values detected.` : 'unknown'} |`,
+    `| Shadows | ${shadowValues} | Preserve existing elevation before adding new shadows. |`,
+    `| Borders | ${borderValues} | Reuse detected border widths/styles before adding new ones. |`
+  ].join('\n');
+}
+
+function buildCssVariableList(cssVariables = []) {
+  if (!cssVariables.length) return '- No CSS variables detected in computed root styles.';
+
+  return [
+    '| Variable | Value |',
+    '|---|---|',
+    ...cssVariables.slice(0, 16).map(variable => `| ${escapePipes(variable.name)} | ${escapePipes(variable.value)} |`)
+  ].join('\n');
+}
+
+function buildComponentInventoryRows(components = {}) {
+  const counts = components.counts || {};
+  const samples = components.samples || {};
+  const componentRows = [
+    componentInventoryRow('Button', count(counts.buttons), inferButtonVariants(samples), interactiveStates('button'), buttonAccessibilityRisk(components), recommendComponent(count(counts.buttons), buttonAccessibilityRisk(components), 2)),
+    componentInventoryRow('Link', count(counts.links), inferLinkVariants(samples), interactiveStates('link'), linkAccessibilityRisk(components), recommendComponent(count(counts.links), linkAccessibilityRisk(components), 4)),
+    componentInventoryRow('Form field', count(counts.inputs), inferFormFieldVariants(components), interactiveStates('formField'), formFieldAccessibilityRisk(components), recommendComponent(count(counts.inputs), formFieldAccessibilityRisk(components), 2)),
+    componentInventoryRow('Card', count(counts.cards), count(counts.cards) ? 'layout/content variants unknown' : 'none detected', 'default', 'unknown', recommendComponent(count(counts.cards), 'unknown', 3)),
+    componentInventoryRow('Alert', count(counts.alerts), count(counts.alerts) ? 'status messaging candidate' : 'none detected', 'default, error, success, warning, info', count(counts.alerts) ? 'verify role and live region behavior' : 'unknown', recommendComponent(count(counts.alerts), 'unknown', 2)),
+    componentInventoryRow('Badge', count(counts.badges), count(counts.badges) ? 'label/status candidate' : 'none detected', 'default', 'verify contrast at small sizes', recommendComponent(count(counts.badges), 'verify contrast at small sizes', 3)),
+    componentInventoryRow('Navigation', count(counts.navigation), count(counts.navigation) ? 'landmark/navigation candidate' : 'none detected', 'default, hover, focus, current', count(counts.navigation) ? 'verify landmarks, current state and focus order' : 'unknown', recommendComponent(count(counts.navigation), 'unknown', 1)),
+    componentInventoryRow('Modal/Dialog', count(counts.dialogs), count(counts.dialogs) ? 'dialog candidate' : 'none detected', 'default, focus-trapped, closing, loading, error', count(counts.dialogs) ? 'verify focus trap, escape behavior and aria-modal' : 'unknown', recommendComponent(count(counts.dialogs), 'verify focus trap, escape behavior and aria-modal', 1)),
+    componentInventoryRow('Form', count(counts.forms), count(counts.forms) ? 'submission flow candidate' : 'none detected', 'default, validating, loading, disabled, error, success', formAccessibilityRisk(components), recommendComponent(count(counts.forms), formAccessibilityRisk(components), 1)),
+    componentInventoryRow('CTA group', count(counts.ctaGroups), inferCtaGroupVariants(components), interactiveStates('button'), ctaGroupAccessibilityRisk(components), recommendComponent(count(counts.ctaGroups), ctaGroupAccessibilityRisk(components), 1))
+  ];
+
+  return componentRows.join('\n');
+}
+
+function componentInventoryRow(name, instances, variants, states, risk, recommendation) {
+  return `| ${name} | ${instances} | ${escapePipes(variants)} | ${escapePipes(states)} | ${escapePipes(risk)} | ${recommendation} |`;
+}
+
+function buildImplementationGuidance(snapshot = {}) {
+  const colors = snapshot.colors || {};
+  const spacing = snapshot.spacing || {};
+  const components = snapshot.components || {};
+  const typography = snapshot.typography || {};
+  const dominantSpacing = (spacing.spacingScale || []).slice(0, 5).map(item => item.value).join(', ');
+  const dominantRadius = (spacing.radii || [])[0]?.value;
+  const recurrentColors = (colors.colors || []).slice(0, 6).map(color => `${color.value} (${color.suggestedRole || 'unknown'})`).join(', ');
+  const fontFamilies = (typography.fontFamilies || []).slice(0, 3).map(item => item.value).join(', ');
+  const guidance = [];
+
+  if (dominantSpacing) guidance.push(`[detected] Preserve the detected spacing rhythm: ${dominantSpacing}. Use these values before introducing new spacing.`);
+  else guidance.push('[guidance] Define a small spacing scale before adding new layout values.');
+
+  if (recurrentColors) guidance.push(`[detected] Reuse detected colors before adding new ones: ${recurrentColors}. Map any new grey or state color to a named token.`);
+  else guidance.push('[guidance] Do not introduce new greys or state colors without mapping them to semantic tokens.');
+
+  if (dominantRadius) guidance.push(`[detected] Do not create new radii unless needed; ${dominantRadius} is the most frequent detected radius.`);
+  else guidance.push('[guidance] Choose one default radius for buttons/cards before adding variants.');
+
+  if (fontFamilies) guidance.push(`[detected] Keep typography changes within the detected families first: ${fontFamilies}.`);
+  guidance.push('[guidance] Maintain one primary CTA per decision block; secondary actions should look secondary.');
+  guidance.push('[guidance] Define interactive states for reusable controls: default, hover, focus, loading, disabled, error and success.');
+  guidance.push('[guidance] Do not rely on placeholder text as the only form label.');
+  guidance.push('[guidance] Respect heading hierarchy and avoid skipping semantic heading levels when changing copy/layout.');
+  guidance.push('[guidance] Maintain sufficient contrast for text, borders, focus rings and status colors.');
+
+  if (count(components.counts?.inputs) && (components.samples?.unlabeledInputs || []).length) {
+    guidance.push(`[detected] Add explicit labels or accessible names for ${(components.samples.unlabeledInputs || []).length} detected unlabeled form field(s).`);
+  }
+
+  if (count(components.counts?.buttons) > 1) {
+    guidance.push(`[detected] Review ${components.counts.buttons} detected buttons/actions for primary vs secondary hierarchy.`);
+  }
+
+  return guidance;
+}
+
+function buildGithubEvidence(snapshot = {}, report = {}) {
+  const evidence = [];
+  const colors = snapshot.colors || {};
+  const spacing = snapshot.spacing || {};
+  const components = snapshot.components || {};
+  const counts = components.counts || {};
+  const samples = components.samples || {};
+  const frictions = snapshot.frictions || report.uxFrictions || [];
+  const reportTokens = report.detectedTokens || {};
+
+  if (Number.isFinite(colors.totalUniqueColors)) evidence.push(`${colors.totalUniqueColors} unique color value(s) detected.`);
+  else if ((reportTokens.colors || []).length) evidence.push(`${reportTokens.colors.length} reported color token(s) detected.`);
+  if (Number.isFinite(spacing.totalUniqueSpacingValues)) evidence.push(`${spacing.totalUniqueSpacingValues} unique spacing value(s) detected.`);
+  else if ((reportTokens.spacing || []).length) evidence.push(`${reportTokens.spacing.length} reported spacing token(s) detected.`);
+  if (Number.isFinite(spacing.totalUniqueRadiusValues)) evidence.push(`${spacing.totalUniqueRadiusValues} unique radius value(s) detected.`);
+  else if ((reportTokens.radius || []).length) evidence.push(`${reportTokens.radius.length} reported radius token(s) detected.`);
+  if (Number.isFinite(counts.buttons)) evidence.push(`${counts.buttons} button/CTA candidate(s) detected.`);
+  else if (getDetectedComponentCount(report, 'Button')) evidence.push(`${getDetectedComponentCount(report, 'Button')} button/CTA candidate(s) detected.`);
+  if (Number.isFinite(counts.ctaGroups) && counts.ctaGroups > 0) evidence.push(`${counts.ctaGroups} CTA group candidate(s) detected.`);
+  if ((samples.unlabeledInputs || []).length) evidence.push(`${samples.unlabeledInputs.length} form field(s) without a clear accessible label.`);
+  if ((samples.genericLinks || []).length) evidence.push(`${samples.genericLinks.length} generic link label(s) detected.`);
+  if (frictions.length) evidence.push(`${frictions.length} UX friction note(s) detected; top note: ${frictions[0].title}.`);
+
+  return evidence;
+}
+
+function buildGithubProblem(snapshot, report, evidence) {
+  const frictions = snapshot.frictions || report.uxFrictions || [];
+  if (frictions[0]?.title) return `${frictions[0].title}. This should be reviewed as UI/UX debt before new interface changes are layered on top.`;
+  if (evidence.length) return 'The current page shows observable UI/design-system signals that should be reviewed before implementation work continues.';
+  return 'Contextic did not detect enough observable evidence for a specific defect. Use this issue as a conservative manual UI review checklist.';
+}
+
+function buildGithubSuggestedFix(snapshot, report, evidence) {
+  const frictions = snapshot.frictions || report.uxFrictions || [];
+  if (frictions[0]?.recommendation) return frictions[0].recommendation;
+  if (evidence.length) return 'Normalize the UI around the detected tokens, clarify reusable component states and resolve any accessibility risks with direct DOM/CSS evidence.';
+  return 'Review the screen manually, capture concrete evidence, then scope a small UI consistency fix instead of redesigning from assumptions.';
+}
+
+function buildGithubAcceptanceCriteria(snapshot, report, evidence) {
+  const criteria = ['Evidence used for the fix is listed in the implementation notes or PR description.'];
+  const components = snapshot.components || {};
+
+  if (count(components.counts?.buttons) > 0 || getDetectedComponentCount(report, 'Button') > 0) criteria.push('Primary and secondary actions are visually distinguishable and only one primary CTA appears per decision block.');
+  if (count(components.counts?.inputs) > 0 || getDetectedComponentCount(report, 'Form field') > 0) criteria.push('Form fields have visible labels or accessible names plus error/help text where relevant.');
+  if (evidence.some(item => item.includes('color'))) criteria.push('New or changed colors are mapped to existing or explicitly named semantic tokens.');
+  if (evidence.some(item => item.includes('spacing') || item.includes('radius'))) criteria.push('Spacing and radius changes reuse the detected scale unless a documented exception is needed.');
+
+  criteria.push('Interactive components define default, hover, focus, loading, disabled, error and success states when applicable.');
+  criteria.push('Contrast and heading hierarchy are checked before merge.');
+
+  return criteria;
+}
+
+function looksLikeReport(input) {
+  return Boolean(input?.meta?.toolName && input?.detectedTokens && input?.detectedComponents);
+}
+
+function getDetectedComponentCount(report = {}, name) {
+  const match = (report.detectedComponents || []).find(component => component.name === name);
+  return count(match?.count);
+}
+
+function parseTypeStyle(value = '') {
+  const parts = String(value).split('|').map(part => part.trim());
+  const sizeLine = parts[1] || '';
+  const sizeMatch = sizeLine.match(/^([^/]+)(?:\/(.+))?$/);
+
+  return {
+    fontFamily: parts[0] || 'unknown',
+    fontSize: sizeMatch?.[1]?.trim() || 'unknown',
+    lineHeight: sizeMatch?.[2]?.trim() || 'unknown',
+    weight: parts[2] || 'unknown',
+    letterSpacing: parts[3] || 'unknown'
+  };
+}
+
+function inferTypographyUse(style) {
+  const size = Number.parseFloat(style.fontSize);
+  const weight = Number.parseInt(style.weight, 10);
+
+  if (Number.isFinite(size) && size >= 32) return 'display/hero heading';
+  if (Number.isFinite(size) && size >= 20) return 'heading';
+  if (Number.isFinite(weight) && weight >= 650) return 'emphasis or heading';
+  if (Number.isFinite(size) && size <= 13) return 'caption/supporting text';
+  if (Number.isFinite(size)) return 'body text';
+  return 'unknown';
+}
+
+function formatTokenValues(items = [], limit = 8) {
+  const values = items.slice(0, limit).map(item => `${item.value} (${item.count})`);
+  return values.join(', ') || 'unknown';
+}
+
+function roleConfidenceFromName(role) {
+  if (!role || role === 'unknown' || role === 'sin mapear') return 'unknown';
+  if (String(role).includes('candidato') || String(role).includes('possible')) return 'possible';
+  return 'likely';
+}
+
+function count(value) {
+  return Number.isFinite(Number(value)) ? Number(value) : 0;
+}
+
+function inferButtonVariants(samples = {}) {
+  const buttons = samples.buttons || [];
+  const variants = [];
+  if (buttons.length) variants.push('primary candidate from visible actions');
+  if (buttons.some(button => button.disabled)) variants.push('disabled');
+  return variants.join(', ') || 'none detected';
+}
+
+function inferLinkVariants(samples = {}) {
+  const variants = ['default'];
+  if ((samples.genericLinks || []).length) variants.push('generic-label risk');
+  return variants.join(', ');
+}
+
+function inferFormFieldVariants(components = {}) {
+  const counts = components.counts || {};
+  const samples = components.samples || {};
+  if (!count(counts.inputs)) return 'none detected';
+  const variants = ['text/input candidate'];
+  if ((samples.unlabeledInputs || []).length) variants.push('unlabeled');
+  if ((samples.disabledControls || []).length) variants.push('disabled');
+  return variants.join(', ');
+}
+
+function inferCtaGroupVariants(components = {}) {
+  const groups = components.samples?.ctaGroups || [];
+  if (!groups.length) return 'none detected';
+  return groups.map(group => `${group.actions.length} action(s)`).join(', ');
+}
+
+function interactiveStates(type) {
+  if (type === 'link') return 'default, hover, focus, visited, disabled if applicable';
+  if (type === 'formField') return 'default, focus, filled, disabled, error, success, loading';
+  return 'default, hover, focus, loading, disabled, error, success';
+}
+
+function buttonAccessibilityRisk(components = {}) {
+  const disabled = components.samples?.disabledControls || [];
+  if (disabled.length) return `${disabled.length} disabled control(s); verify recovery/microcopy`;
+  return count(components.counts?.buttons) ? 'verify focus visible and accessible names' : 'unknown';
+}
+
+function linkAccessibilityRisk(components = {}) {
+  const genericLinks = components.samples?.genericLinks || [];
+  if (genericLinks.length) return `${genericLinks.length} generic link label(s)`;
+  return count(components.counts?.links) ? 'verify focus visible and descriptive labels' : 'unknown';
+}
+
+function formFieldAccessibilityRisk(components = {}) {
+  const unlabeled = components.samples?.unlabeledInputs || [];
+  if (unlabeled.length) return `${unlabeled.length} field(s) without clear label`;
+  return count(components.counts?.inputs) ? 'verify labels, help text and error state' : 'unknown';
+}
+
+function formAccessibilityRisk(components = {}) {
+  if (!count(components.counts?.forms)) return 'unknown';
+  if ((components.samples?.unlabeledInputs || []).length) return 'contains unlabeled field candidates';
+  return 'verify submit, loading, success, error and privacy microcopy';
+}
+
+function ctaGroupAccessibilityRisk(components = {}) {
+  if (!count(components.counts?.ctaGroups)) return 'unknown';
+  return 'verify primary/secondary hierarchy and keyboard focus order';
+}
+
+function recommendComponent(instances, risk, promotionThreshold) {
+  if (instances <= 0) return 'keep_local';
+  if (risk && risk !== 'unknown' && !risk.startsWith('verify focus visible')) return 'needs_review';
+  if (instances >= promotionThreshold) return 'promote_to_core_component';
+  return 'keep_local';
 }
 
 function formatBehavioralMapRow(block) {

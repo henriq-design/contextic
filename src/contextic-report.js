@@ -27,10 +27,12 @@ export function buildContexticReport(snapshot = {}) {
     },
     detectedTokens: {
       colors: colors.colors || [],
+      cssVariables: colors.cssVariables || [],
       typography: typography.typeStyles || [],
       spacing: spacing.spacingScale || [],
       radius: spacing.radii || [],
-      shadows: spacing.shadows || []
+      shadows: spacing.shadows || [],
+      borders: spacing.borders || []
     },
     detectedComponents: buildDetectedComponents(components),
     behavioralMapping: normalizeBehavioralMapping(behavioralMapping),
@@ -112,6 +114,9 @@ function buildDetectedComponents(components) {
     ['Card', counts.cards],
     ['Alert / live region', counts.alerts],
     ['Navigation', counts.navigation],
+    ['Modal / dialog', counts.dialogs],
+    ['Badge', counts.badges],
+    ['CTA group', counts.ctaGroups],
     ['Image', counts.images]
   ]
     .filter(([, count]) => Number(count) > 0)
