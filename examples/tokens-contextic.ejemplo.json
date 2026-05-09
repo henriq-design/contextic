@@ -1,0 +1,36 @@
+{
+  "generadoEn": "2026-05-09T10:30:00.000Z",
+  "fuente": "https://example.com/pricing",
+  "colores": [
+    {
+      "valor": "#0057ff",
+      "recuento": 42,
+      "rolSugerido": "candidato a primario/acento"
+    },
+    {
+      "valor": "#ffffff",
+      "recuento": 36,
+      "rolSugerido": "superficie/fondo"
+    }
+  ],
+  "tipografia": [
+    {
+      "valor": "Inter | 16px | 24px | 400",
+      "recuento": 55
+    }
+  ],
+  "espaciado": [
+    {
+      "valor": "16px",
+      "recuento": 28
+    }
+  ],
+  "radios": [
+    {
+      "valor": "8px",
+      "recuento": 14
+    }
+  ],
+  "sombras": [],
+  "bordes": []
+}

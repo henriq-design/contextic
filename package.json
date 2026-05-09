@@ -1,0 +1,27 @@
+{
+  "name": "contextic",
+  "version": "0.2.0",
+  "description": "Contextic: bookmarklet de un clic que convierte cualquier página web en un briefing técnico de diseño con tokens, componentes, fricciones UX y estructura behavioral.",
+  "type": "module",
+  "private": false,
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "make:bookmarklet": "node scripts/make-bookmarklet.mjs",
+    "serve": "node scripts/serve.mjs",
+    "check": "node --check src/index.js"
+  },
+  "keywords": [
+    "bookmarklet",
+    "sistemas-de-diseno",
+    "diseno-conductual",
+    "ux",
+    "handoff",
+    "tokens-de-diseno",
+    "cro",
+    "ia",
+    "codex",
+    "cursor"
+  ],
+  "author": "Enrique Moreno",
+  "license": "MIT"
+}

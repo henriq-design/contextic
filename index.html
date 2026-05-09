@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Demo de Contextic</title>
+  <style>
+    :root {
+      --color-primary: #0057ff;
+      --color-text: #111827;
+      --color-muted: #6b7280;
+      --color-surface: #ffffff;
+      --color-background: #f3f4f6;
+      --radius-md: 12px;
+    }
+    body {
+      margin: 0;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--color-background);
+      color: var(--color-text);
+    }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 64px 24px;
+    }
+    .hero, .card {
+      background: var(--color-surface);
+      border-radius: var(--radius-md);
+      padding: 32px;
+      box-shadow: 0 16px 48px rgba(17, 24, 39, .08);
+    }
+    h1 {
+      font-size: 48px;
+      line-height: 56px;
+      margin: 0 0 16px;
+    }
+    p {
+      font-size: 16px;
+      line-height: 24px;
+      color: var(--color-muted);
+    }
+    button, .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0 18px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--color-primary);
+      color: white;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .secondary {
+      background: #111827;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 24px;
+    }
+    label {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    input {
+      width: 100%;
+      min-height: 44px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 0 12px;
+      font: inherit;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <h1>Página de demo para Contextic</h1>
+      <p>Esta página incluye acciones repetidas y valores visuales intencionadamente variados para que el bookmarklet tenga señales que detectar.</p>
+      <a class="button" href="#start">Empezar ahora</a>
+      <a class="button secondary" href="#demo">Reservar demo</a>
+      <button type="button">Crear cuenta</button>
+    </section>
+
+    <section class="grid" aria-label="Tarjetas de funcionalidades">
+      <article class="card">
+        <h2>Captura</h2>
+        <p>Extrae colores, tipografía, espaciado y componentes.</p>
+      </article>
+      <article class="card">
+        <h2>Lente de fricción</h2>
+        <p>Detecta riesgos de claridad de decisión y handoff.</p>
+      </article>
+      <article class="card">
+        <h2>Markdown</h2>
+        <p>Copia contexto para Codex, Cursor o GitHub.</p>
+      </article>
+    </section>
+
+    <section class="card" style="margin-top:24px">
+      <label for="email">Email</label>
+      <input id="email" type="email" placeholder="nombre@ejemplo.com">
+      <input type="text" placeholder="Ejemplo de input sin etiqueta" style="margin-top:16px">
+    </section>
+  </main>
+
+  <script type="module" src="./src/index.js"></script>
+</body>
+</html>
