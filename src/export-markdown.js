@@ -1,21 +1,24 @@
+import { buildContexticReport, buildJsonExport as buildContexticJsonExport } from './contextic-report.js';
+
 export function buildDesignContextMarkdown(snapshot) {
   const { meta, colors, typography, spacing, components, frictions, behavioralMapping, behavioralRecommendation } = snapshot;
+  const report = buildContexticReport(snapshot);
 
   return `# Briefing técnico de diseño — Contextic
 
-Capturado desde: ${meta.url}
-Título: ${meta.title || 'Sin título'}
-Generado en: ${meta.generatedAt}
+Capturado desde: ${report.meta.sourceUrl}
+Título: ${report.screenSummary.pageTitle || 'Sin título'}
+Generado en: ${report.meta.generatedAt}
 Viewport: ${meta.viewport.width}x${meta.viewport.height}
 
 ## 1. Diagnóstico ejecutivo
 
 ### Tipo de pantalla
-- Tipo detectado: ${inferScreenType(components, behavioralMapping)}
-- Objetivo principal probable: conversión o navegación hacia una acción principal.
-- Acción de conversión principal: ${getPrimaryActionLabel(components)}
+- Tipo detectado: ${formatReportValue(report.screenSummary.detectedScreenType)}
+- Objetivo principal probable: ${formatReportValue(report.screenSummary.probableBusinessGoal)}
+- Acción de conversión principal: ${formatReportValue(report.screenSummary.primaryConversionAction)}
 - Nivel de madurez de la pantalla: ${inferMaturity(behavioralMapping)}
-- Riesgo principal de conversión: ${getMainConversionRisk(frictions, behavioralMapping)}
+- Riesgo principal de conversión: ${formatReportValue(report.screenSummary.mainConversionRisk)}
 
 ### Lectura estratégica
 ${buildStrategicReading(frictions, behavioralMapping)}
@@ -128,6 +131,10 @@ ${buildMinimumChanges(frictions, behavioralMapping)}
 ### Siguiente experimento recomendado
 ${buildNextExperiment(frictions, behavioralMapping)}
 `;
+}
+
+export function buildJsonExport(snapshot) {
+  return buildContexticJsonExport(snapshot);
 }
 
 export function buildGitHubIssueMarkdown(snapshot) {
@@ -286,6 +293,11 @@ function buildPrioritizationRows(frictions, behavioralMapping) {
     .slice(0, 4)
     .map(block => `| ${block.block === 'what' || block.block === 'where' ? 'P0' : 'P1'} | Reforzar ${block.label} | ${escapePipes(block.frictionType)} | Medio | Medio | Contenido + patrón UI |`)
     .join('\n') || '| P2 | Revisión manual | Validación heurística | Bajo | Bajo | Ninguna |';
+}
+
+function formatReportValue(value) {
+  if (value && typeof value === 'object' && 'value' in value) return value.value;
+  return value || 'unknown';
 }
 
 function inferScreenType(components, behavioralMapping) {
