@@ -1,87 +1,64 @@
 # Contextic
 
-**Contextic** es un bookmarklet de un clic que convierte cualquier página web en un briefing técnico de diseño para diseñadores, desarrolladores y agentes de IA.
+Contextic convierte cualquier página web en un `design-context.md` con tokens visuales, componentes detectados, fricciones UX y reglas de implementación listas para diseño, desarrollo e IA.
 
-Analiza lo que una pantalla ya comunica a través del DOM y los estilos calculados: tokens visuales, patrones UI, componentes candidatos, fricciones UX y reglas de implementación listas para handoff.
+## Qué es
 
-El objetivo no es sustituir el criterio de diseño. El objetivo es reducir ambigüedad antes de modificar una pantalla real.
+Contextic es un bookmarklet ligero que funciona desde el navegador. Analiza el DOM visible y los estilos calculados de la página actual, abre un panel lateral y genera contexto accionable para handoff. No necesita backend, login ni instalación de extensión.
 
-## Por qué existe Contextic
+## Para quién es
 
-Diseñadores y desarrolladores suelen modificar interfaces existentes sin documentación clara. La fuente de verdad suele estar repartida entre CSS, componentes, estados, textos y decisiones visuales que ya viven en producción.
+- Product Designers.
+- UX/UI Designers.
+- Design System Designers.
+- Developers.
+- PMs.
+- Equipos que trabajan con Cursor, Codex, Claude, Jira o GitHub Issues.
 
-Contextic crea una captura rápida de la página actual y la exporta como:
+## Qué problema resuelve
 
-- `design-context.md` para Cursor, Codex, Claude y documentación de handoff,
-- `contextic-report.json` para inspección estructurada,
-- `github-issue.md` para documentar deuda UI/UX accionable.
+Antes de pedir cambios a IA, diseño o desarrollo suele faltar contexto real de la interfaz: tokens usados, patrones existentes, componentes visibles, fricciones UX, reglas de implementación y criterios de aceptación.
+
+Contextic reduce ese trabajo manual creando una captura técnica de la pantalla actual, lista para pegar en herramientas de IA, documentación de handoff o issues.
+
+## Qué genera
+
+### `design-context.md`
+
+El briefing principal para diseño, desarrollo e IA. Incluye:
+
+- Design System Snapshot.
+- Component Inventory.
+- UX Friction Notes.
+- Implementation guidance.
+
+### `contextic-report.json`
+
+Datos estructurados para automatización, tests, exploración técnica o futuros flujos de integración.
+
+### `github-issue.md`
+
+Un issue accionable con:
+
+- Problem.
+- Evidence.
+- Suggested fix.
+- Acceptance criteria.
+- Notes for implementation.
 
 ## Instalación rápida
 
-1. Abrir la página de instalación:
-   - https://henriq-design.github.io/contextic/
-2. Arrastrar el bookmarklet a la barra de favoritos.
+1. Abrir `https://henriq-design.github.io/contextic/`.
+2. Arrastrar el bookmarklet Contextic a la barra de favoritos.
 3. Abrir cualquier página web.
 4. Hacer clic en Contextic.
 5. Copiar el output deseado.
 
-## Qué detecta el MVP
-
-Cuando se ejecuta el bookmarklet, Contextic abre un panel lateral y analiza la página actual:
-
-- colores desde estilos calculados,
-- patrones tipográficos,
-- escala de espaciado,
-- radios, sombras y bordes,
-- componentes UI comunes,
-- fricciones heurísticas de UX y sistema de diseño,
-- claridad de decisión,
-- riesgos en formularios y ayuda contextual,
-- mapa behavioral de 7 bloques,
-- scoring de prioridad P0/P1/P2,
-- propuesta de estructura behavioral recomendada,
-- recomendaciones de handoff para desarrollo/IA.
-
-Contextic es un asistente heurístico, no una auditoría absoluta. Aporta evidencia para tomar mejores decisiones de producto y diseño.
-
-## Modelo behavioral
-
-La capa diferencial de Contextic es el diseño conductual. Una pantalla no se evalúa solo por su estética, sino por cómo responde a las preguntas mentales del usuario:
-
-| Bloque | Pregunta mental | Fricción que reduce | Resultado esperado |
-|---|---|---|---|
-| What | ¿Qué es esto y qué gano? | Ambigüedad | Comprensión inmediata |
-| Why | ¿Por qué debería importarme? | Baja motivación | Valor percibido |
-| Why not | ¿Qué podría salir mal? | Riesgo percibido | Confianza |
-| Who | ¿Esto es para alguien como yo? | Falta de identificación | Relevancia personal |
-| How | ¿Cómo funciona o cómo empiezo? | Esfuerzo percibido | Facilidad |
-| Where | ¿Dónde actúo? | Baja accionabilidad | Conversión accesible |
-| When | ¿Por qué ahora? | Procrastinación | Acción inmediata legítima |
-
-## Documentación operativa para IA
-
-El repositorio incluye documentación de producto y documentación operativa para agentes de IA:
+Si la página pública todavía no carga, activa GitHub Pages en:
 
 ```txt
-docs/diseno-conductual/
-├─ README.md
-├─ heuristicas-conductuales.md
-├─ patrones-de-friccion.md
-├─ claridad-de-decision.md
-├─ plantilla-para-reglas.md
-├─ roadmap.md
-└─ operativa-ia/
-   ├─ 00_system_prompt_landing_behavioral.md
-   ├─ 01_output_schema_briefing_tecnico.md
-   ├─ 02_behavioral_structure_7_blocks.md
-   ├─ 03_detection_rules_ui_tokens_components.md
-   ├─ 04_friction_scoring_and_prioritization.md
-   ├─ 05_recommendation_engine_behavioral.md
-   ├─ 06_quality_gate_and_guardrails.md
-   └─ 07_codex_implementation_notes.md
+Settings → Pages → Deploy from branch → main → /docs
 ```
-
-La carpeta `operativa-ia/` funciona como fuente de verdad para evolucionar Contextic con Codex, Cursor o cualquier agente de código.
 
 ## Uso local
 
@@ -91,163 +68,111 @@ npm run build
 npm run build:pages
 npm test
 npm run check
+```
+
+Para abrir la demo local:
+
+```bash
 npm run serve
 ```
 
-Abre:
+Después visita:
 
 ```txt
 http://localhost:5173
 ```
 
-La página de demo local carga Contextic automáticamente para que puedas inspeccionar el panel desde el primer momento.
+## Ejemplo de uso con IA
 
-## GitHub Pages
+1. Copia `design-context.md` desde Contextic.
+2. Pégalo en Cursor, Codex o Claude.
+3. Añade una petición como:
 
-Para publicar la página instalable desde este repo, ejecuta:
-
-```bash
-npm run build:pages
+```md
+Usa este design-context.md como contexto. Propón cambios de UI respetando tokens, componentes existentes, fricciones detectadas y reglas de implementación.
 ```
 
-El script genera:
+También puedes pegar `github-issue.md` directamente en GitHub Issues o Jira como punto de partida para una tarea de deuda UI/UX.
 
-```txt
-docs/index.html
-docs/contextic.iife.js
-docs/bookmarklet.txt
+## Ejemplo de output
+
+```md
+## Design System Snapshot
+
+### Colors
+- #0057FF — posible primary
+- #F5F7FA — posible surface
+
+### Components
+- Button — primary / secondary
+- Form field — default / focus / error
+- Card — feature / benefit
+
+## UX Friction Notes
+
+- P1 — CTA principal poco específico
+- P1 — Formulario sin microcopy de confianza
+
+## Implementation guidance
+
+- Reutilizar tokens detectados antes de introducir nuevos colores.
+- Mantener un único CTA primario por bloque de decisión.
+- Definir estados focus, loading, disabled y error.
 ```
 
-La URL pública prevista del bundle es:
+## Qué analiza actualmente
 
-```txt
-https://henriq-design.github.io/contextic/contextic.iife.js
-```
-
-Si GitHub Pages todavía no está activado, configúralo en GitHub:
-
-```txt
-Settings → Pages → Source: Deploy from branch → Branch: main → Folder: /docs
-```
-
-## Exports disponibles
-
-- `design-context.md`
-- `contextic-report.json`
-- `github-issue.md`
-
-## Bookmarklet de producción
-
-Después de ejecutar:
-
-```bash
-npm run build:pages
-```
-
-Obtendrás:
-
-```txt
-docs/contextic.iife.js
-docs/bookmarklet.txt
-```
-
-El bookmarklet de `docs/bookmarklet.txt` carga el bundle público:
-
-```js
-javascript:(()=>{const s=document.createElement('script');s.src='https://henriq-design.github.io/contextic/contextic.iife.js?v='+Date.now();document.documentElement.appendChild(s);})();
-```
-
-Crea un marcador en el navegador y pega esa URL de una sola línea como ubicación del marcador.
+- Colores.
+- Tipografía.
+- Espaciado.
+- Radios.
+- Sombras.
+- Bordes.
+- CSS variables.
+- Botones.
+- Enlaces.
+- Formularios.
+- Badges.
+- Modales/dialogs.
+- CTA groups.
+- Fricciones UX básicas.
+- Reglas de implementación.
 
 ## Limitaciones
 
-- Funciona sobre DOM visible y estilos calculados.
-- No interpreta intención de negocio con certeza.
+- Analiza DOM visible y estilos calculados.
+- No ve intención de negocio con certeza.
 - No sustituye revisión humana de producto, diseño o accesibilidad.
-- Algunas inferencias pueden ser aproximadas.
-- Páginas con Shadow DOM, iframes o apps muy dinámicas pueden limitar el análisis.
-
-## Estructura del repositorio
-
-```txt
-contextic/
-├─ bookmarklet.js
-├─ src/
-│  ├─ index.js
-│  ├─ utils.js
-│  ├─ collect-colors.js
-│  ├─ collect-typography.js
-│  ├─ collect-spacing.js
-│  ├─ collect-components.js
-│  ├─ behavioral-model.js
-│  ├─ detect-frictions.js
-│  └─ export-markdown.js
-├─ docs/
-│  ├─ index.html
-│  ├─ contextic.iife.js
-│  ├─ bookmarklet.txt
-│  └─ diseno-conductual/
-│     ├─ README.md
-│     ├─ heuristicas-conductuales.md
-│     ├─ patrones-de-friccion.md
-│     ├─ claridad-de-decision.md
-│     ├─ plantilla-para-reglas.md
-│     ├─ roadmap.md
-│     └─ operativa-ia/
-├─ examples/
-│  ├─ contexto-diseno.ejemplo.md
-│  ├─ auditoria-conductual.ejemplo.md
-│  ├─ issue-github.ejemplo.md
-│  └─ tokens-contextic.ejemplo.json
-├─ scripts/
-│  ├─ build.mjs
-│  ├─ build-pages.mjs
-│  ├─ make-bookmarklet.mjs
-│  └─ serve.mjs
-├─ CODEX_CONTEXT.md
-├─ ROADMAP.md
-├─ README.md
-└─ demo.gif
-```
-
-## Heurísticas actuales
-
-El MVP detecta:
-
-- demasiadas acciones visualmente primarias por encima del primer pliegue,
-- deriva en la escala de espaciado,
-- inconsistencia en radios,
-- inputs sin etiqueta clara,
-- controles deshabilitados que podrían necesitar guía de recuperación,
-- textos de enlace genéricos,
-- imágenes sin atributo `alt`,
-- paletas de color fragmentadas,
-- presencia y calidad heurística de los bloques What, Why, Why not, Who, How, Where y When.
-
-Estas reglas son intencionadamente simples. La siguiente capa debería hacerlas configurables, mejor evidenciadas y menos ruidosas.
+- Puede fallar o ver menos información en páginas con Shadow DOM, iframes o apps muy dinámicas.
+- Algunas inferencias son aproximadas.
+- Behavioral es una capa de apoyo dentro de UX Friction Notes, no una verdad absoluta.
 
 ## Roadmap
 
-El roadmap del MVP vive en [`ROADMAP.md`](./ROADMAP.md).
+- v0.1.0 — Bookmarklet MVP.
+- v0.2.0 — Mejor inferencia de design system.
+- v0.3.0 — Más modos de handoff.
+- v0.4.0 — Behavioral layer avanzada.
+- v1.0.0 — Herramienta estable.
 
-## Cómo usarlo con Codex o Cursor
+Ver roadmap completo en [`ROADMAP.md`](./ROADMAP.md).
 
-1. Ejecuta Contextic sobre una página real.
-2. Copia `design-context.md`.
-3. Pégalo en tu agente de código junto con el cambio que quieres hacer.
-4. Pide al agente que preserve las restricciones visuales, sistémicas y behavioral de la captura.
+## Desarrollo
 
-Prompt de ejemplo:
-
-```md
-Usa este briefing de Contextic como contexto de implementación. Refactoriza el componente de tarjeta de precios sin introducir nuevos colores, valores de espaciado ni radios salvo que sea estrictamente necesario. Mantén una única acción primaria por bloque de decisión y mejora la estructura behavioral What → Why → Why not → Who → How → Where → When sin inventar claims, métricas, testimonios ni urgencia falsa.
+```bash
+npm install
+npm test
+npm run check
+npm run build
+npm run build:pages
 ```
 
-## Principio de diseño
+## Verificación
 
-Una buena salida no es solo datos. Una buena salida ayuda a decidir qué cambiar, qué preservar y qué no romper.
-
-Contextic debe mantenerse rápido, transparente y útil en flujos reales de trabajo.
+- `npm test`: ejecuta la suite de tests.
+- `npm run check`: valida sintaxis del entrypoint.
+- `npm run build`: genera el bundle local en `dist/`.
+- `npm run build:pages`: genera los archivos publicables en `docs/`.
 
 ## Licencia
 
