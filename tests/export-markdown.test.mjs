@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createBehavioralFinding } from '../src/behavioral-finding.js';
-import { buildDesignContextMarkdown, buildGithubIssueExport } from '../src/export-markdown.js';
+import { buildDesignContextMarkdown, buildGitHubIssueMarkdown, buildGithubIssueExport, buildJsonExport } from '../src/export-markdown.js';
 
 test('design context markdown leads with technical design context sections', () => {
   const markdown = buildDesignContextMarkdown(createSnapshot());
@@ -35,6 +35,26 @@ test('github issue export includes the required issue structure', () => {
   assert.match(markdown, /## Evidence/);
   assert.match(markdown, /## Suggested fix/);
   assert.match(markdown, /## Acceptance criteria/);
+});
+
+test('copy exports can be generated from the same snapshot', () => {
+  const snapshot = createSnapshot();
+  const designContext = buildDesignContextMarkdown(snapshot);
+  const jsonReport = buildJsonExport(snapshot);
+  const githubIssue = buildGithubIssueExport(snapshot);
+  const parsedReport = JSON.parse(jsonReport);
+
+  assert.match(designContext, /^# design-context\.md/);
+  assert.equal(parsedReport.meta.sourceUrl, snapshot.meta.url);
+  assert.equal(parsedReport.screenSummary.pageTitle, snapshot.meta.title);
+  assert.match(githubIssue, /2 button\/CTA candidate\(s\) detected/);
+  assert.match(githubIssue, /Acciones primarias compitiendo/);
+});
+
+test('GitHub issue compatibility export stays wired to the new export', () => {
+  const snapshot = createSnapshot();
+
+  assert.equal(buildGitHubIssueMarkdown(snapshot), buildGithubIssueExport(snapshot));
 });
 
 test('github issue export stays conservative when evidence is missing', () => {

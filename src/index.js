@@ -4,7 +4,7 @@ import { collectSpacing } from './collect-spacing.js';
 import { collectComponents } from './collect-components.js';
 import { detectFrictions } from './detect-frictions.js';
 import { buildBehavioralMapping, buildBehavioralStructureRecommendation } from './behavioral-model.js';
-import { buildDesignContextMarkdown, buildGitHubIssueMarkdown, buildTokensSnapshot } from './export-markdown.js';
+import { buildDesignContextMarkdown, buildGithubIssueExport, buildJsonExport } from './export-markdown.js';
 
 const PANEL_ID = 'contextic-panel';
 
@@ -57,8 +57,8 @@ function renderPanel(snapshot) {
 
   const shadow = host.attachShadow({ mode: 'open' });
   const designContext = buildDesignContextMarkdown(snapshot);
-  const githubIssue = buildGitHubIssueMarkdown(snapshot);
-  const tokens = JSON.stringify(buildTokensSnapshot(snapshot), null, 2);
+  const jsonReport = buildJsonExport(snapshot);
+  const githubIssue = buildGithubIssueExport(snapshot);
 
   shadow.innerHTML = `
     <style>
@@ -212,7 +212,7 @@ function renderPanel(snapshot) {
       <header>
         <div>
           <h2>Contextic</h2>
-          <p class="subtitle">Sistema de diseño y contexto conductual en un clic.</p>
+          <p class="subtitle">Contexto técnico de diseño listo para IA y handoff.</p>
         </div>
         <button class="close" type="button" aria-label="Cerrar panel">×</button>
       </header>
@@ -251,10 +251,10 @@ function renderPanel(snapshot) {
         `).join('') || '<p class="notice">No se detectan fricciones heurísticas relevantes. Se recomienda revisión manual.</p>'}
       </div>
       <div class="actions">
-        <button class="copy" type="button" data-copy="design">Copiar briefing-tecnico.md</button>
-        <button class="copy secondary" type="button" data-copy="issue">Copiar issue de GitHub</button>
-        <button class="copy secondary" type="button" data-copy="tokens">Copiar tokens-contextic.json</button>
-        <p class="notice">Salida heurística. Úsala como apoyo de revisión de producto/diseño, no como verdad absoluta.</p>
+        <button class="copy" type="button" data-copy="design">Copiar design-context.md</button>
+        <button class="copy secondary" type="button" data-copy="json">Copiar JSON</button>
+        <button class="copy secondary" type="button" data-copy="issue">Copiar GitHub Issue</button>
+        <p class="notice" data-copy-status>Salida heurística. Úsala como apoyo de revisión de producto/diseño, no como verdad absoluta.</p>
       </div>
     </div>
   `;
@@ -263,10 +263,12 @@ function renderPanel(snapshot) {
   shadow.querySelectorAll('[data-copy]').forEach(button => {
     button.addEventListener('click', async () => {
       const key = button.getAttribute('data-copy');
-      const payload = key === 'design' ? designContext : key === 'issue' ? githubIssue : tokens;
-      await copyToClipboard(payload);
+      const payload = key === 'design' ? designContext : key === 'json' ? jsonReport : githubIssue;
+      const copied = await copyToClipboard(payload);
+      const status = shadow.querySelector('[data-copy-status]');
       const previous = button.textContent;
-      button.textContent = 'Copiado';
+      button.textContent = copied ? 'Copiado' : 'No se pudo copiar';
+      if (status) status.textContent = copied ? 'Copiado al portapapeles.' : 'No se pudo copiar automáticamente.';
       setTimeout(() => { button.textContent = previous; }, 1200);
     });
   });
@@ -286,9 +288,13 @@ function escapeHtml(value) {
 }
 
 async function copyToClipboard(value) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(value);
-    return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {
+    // Sigue con fallback manual.
   }
 
   const textarea = document.createElement('textarea');
@@ -297,8 +303,9 @@ async function copyToClipboard(value) {
   textarea.style.opacity = '0';
   document.body.appendChild(textarea);
   textarea.select();
-  document.execCommand('copy');
+  const copied = document.execCommand?.('copy') === true;
   textarea.remove();
+  return copied;
 }
 
 runContextic();
