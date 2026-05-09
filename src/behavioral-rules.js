@@ -1,3 +1,4 @@
+import { createBehavioralFinding } from './behavioral-finding.js';
 import { getAccessibleName, isProbablyGenericLinkText, isVisibleElement, toPxNumber } from './utils.js';
 
 export const BEHAVIORAL_RULES_VERSION = '0.1.0';
@@ -155,12 +156,12 @@ export function evaluateBehavioralRules(context) {
     if (!detected) return [];
 
     const { detect, ...metadata } = rule;
-    return [{
+    return [createBehavioralFinding({
       ...metadata,
       ruleId: rule.id,
       ruleVersion: BEHAVIORAL_RULES_VERSION,
       ...detected
-    }];
+    })];
   });
 }
 

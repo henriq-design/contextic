@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import { calculatePriority, createBehavioralFinding } from '../src/behavioral-finding.js';
 import { BEHAVIORAL_RULES, evaluateBehavioralRules } from '../src/behavioral-rules.js';
 
 class FakeElement {
@@ -47,6 +48,50 @@ globalThis.document = {
   }
 };
 
+test('calculates behavioral priority from severity, impact and effort', () => {
+  assert.deepEqual(
+    calculatePriority({ severity: 5, expectedImpact: 'high', implementationEffort: 'low' }),
+    { priority: 'P0', priorityScore: 15, severityScore: 5 }
+  );
+  assert.deepEqual(
+    calculatePriority({ severity: 4, expectedImpact: 'medium', implementationEffort: 'low' }),
+    { priority: 'P1', priorityScore: 8, severityScore: 4 }
+  );
+  assert.deepEqual(
+    calculatePriority({ severity: 3, expectedImpact: 'medium', implementationEffort: 'medium' }),
+    { priority: 'P2', priorityScore: 3, severityScore: 3 }
+  );
+});
+
+test('normalizes minimum behavioral finding fields', () => {
+  const finding = createBehavioralFinding({
+    id: 'where.test-rule',
+    title: 'Regla de prueba',
+    block: 'where',
+    frictionType: 'baja_accionabilidad',
+    severity: 4,
+    confidence: 'media',
+    evidenceType: 'structural',
+    evidence: '2 acciones prominentes.',
+    recommendation: 'Mantener una acción primaria.',
+    systemImplication: 'Gobernar variantes de botón.',
+    expectedImpact: 'high',
+    implementationEffort: 'low',
+    metric: 'CTR del CTA principal'
+  });
+
+  for (const field of ['id', 'title', 'block', 'frictionType', 'severity', 'confidence', 'evidenceType', 'evidence', 'recommendation', 'systemImplication', 'expectedImpact', 'implementationEffort', 'priority', 'metric']) {
+    assert.notEqual(finding[field], undefined, field);
+  }
+
+  assert.equal(finding.id, 'where.test-rule');
+  assert.equal(finding.ruleId, 'where.test-rule');
+  assert.equal(finding.type, 'baja_accionabilidad');
+  assert.equal(finding.severityScore, 4);
+  assert.equal(finding.priority, 'P0');
+  assert.match(finding.hypothesis, /^Podría/);
+});
+
 test('behavioral rules expose traceable metadata', () => {
   assert.equal(BEHAVIORAL_RULES.length, 4);
 
@@ -74,6 +119,10 @@ test('detects multiple primary-like actions above the fold as a hypothesis', () 
 
   const finding = findings.find(item => item.ruleId === 'where.multiple-primary-actions');
   assert.ok(finding);
+  assert.equal(finding.id, 'where.multiple-primary-actions');
+  assert.equal(finding.frictionType, 'baja_accionabilidad');
+  assert.equal(finding.severity, 4);
+  assert.equal(finding.priority, 'P0');
   assert.equal(finding.observed.count, 2);
   assert.equal(finding.evidenceType, 'structural');
   assert.match(finding.hypothesis, /^Podría/);

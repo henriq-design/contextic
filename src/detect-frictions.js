@@ -2,7 +2,7 @@ import { createPriorityMetadata } from './behavioral-model.js';
 import { evaluateBehavioralRules } from './behavioral-rules.js';
 
 export function detectFrictions({ colors, spacing, components }, root = document.body) {
-  const frictions = evaluateBehavioralRules({ colors, spacing, components, root }).map(createFinding);
+  const frictions = evaluateBehavioralRules({ colors, spacing, components, root });
 
   if (spacing.totalUniqueSpacingValues > 18) {
     frictions.push(createFinding({
