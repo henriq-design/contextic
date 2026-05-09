@@ -48,7 +48,7 @@ globalThis.document = {
 };
 
 test('behavioral rules expose traceable metadata', () => {
-  assert.equal(BEHAVIORAL_RULES.length, 3);
+  assert.equal(BEHAVIORAL_RULES.length, 4);
 
   for (const rule of BEHAVIORAL_RULES) {
     assert.match(rule.id, /^[a-z_]+\.[a-z0-9-]+$/);
@@ -106,6 +106,26 @@ test('detects form effort and recovery signals from component samples', () => {
 
   assert.ok(findings.find(item => item.ruleId === 'how.unlabeled-inputs'));
   assert.ok(findings.find(item => item.ruleId === 'why_not.disabled-controls-without-recovery'));
+});
+
+test('detects generic link labels as textual ambiguity evidence', () => {
+  const findings = evaluateBehavioralRules({
+    root: createRoot([]),
+    components: {
+      samples: {
+        unlabeledInputs: [],
+        disabledControls: [],
+        genericLinks: ['leer más', 'aquí', 'more'],
+        imagesWithoutAlt: []
+      }
+    }
+  });
+
+  const finding = findings.find(item => item.ruleId === 'what.generic-link-labels');
+  assert.ok(finding);
+  assert.equal(finding.evidenceType, 'textual');
+  assert.equal(finding.observed.count, 3);
+  assert.deepEqual(finding.observed.samples, ['leer más', 'aquí', 'more']);
 });
 
 function createRoot(elements) {

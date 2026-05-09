@@ -76,6 +76,42 @@ export const BEHAVIORAL_RULES = [
     }
   },
   {
+    id: 'what.generic-link-labels',
+    block: 'what',
+    affectedBlocks: ['what', 'where'],
+    type: 'ambiguedad',
+    typeLabel: 'Ambigüedad',
+    signal: 'generic_link_text',
+    severity: 'baja',
+    severityScore: 2,
+    expectedImpact: 'medium',
+    implementationEffort: 'low',
+    confidence: 'alta',
+    evidenceType: 'textual',
+    principle: 'rastro de información',
+    title: 'Texto de enlace genérico',
+    risk: 'Las etiquetas genéricas reducen escaneabilidad, accesibilidad y confianza antes de navegar.',
+    recommendation: 'Usa textos de enlace orientados al resultado que describan el destino o la acción.',
+    systemImplication: 'Añade guías de contenido para enlaces y etiquetas de navegación.',
+    recommendedPattern: 'Link descriptivo orientado a destino',
+    metric: 'CTR de enlaces y navegación posterior',
+    falsePositiveNotes: 'Puede ser aceptable cuando el enlace está dentro de una frase cuyo contexto completo describe claramente el destino.',
+    detect({ components }) {
+      const samples = components.samples.genericLinks.slice(0, 3);
+      if (!samples.length) return null;
+
+      return {
+        evidence: `Textos genéricos: ${samples.join(', ')}.`,
+        observed: {
+          count: components.samples.genericLinks.length,
+          samples
+        },
+        hypothesis: `Podría haber ambigüedad de navegación porque algunos enlaces usan etiquetas genéricas: ${samples.join(', ')}.`,
+        insight: `Se detecta texto de enlace genérico como: ${samples.join(', ')}.`
+      };
+    }
+  },
+  {
     id: 'why_not.disabled-controls-without-recovery',
     block: 'why_not',
     affectedBlocks: ['why_not', 'how', 'where'],

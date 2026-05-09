@@ -48,28 +48,6 @@ export function detectFrictions({ colors, spacing, components }, root = document
     }));
   }
 
-  if (components.samples.genericLinks.length > 0) {
-    frictions.push(createFinding({
-      block: 'what',
-      affectedBlocks: ['what', 'where'],
-      type: 'ambiguedad',
-      typeLabel: 'Ambigüedad',
-      severity: 'baja',
-      severityScore: 2,
-      expectedImpact: 'medium',
-      implementationEffort: 'low',
-      confidence: 'alta',
-      evidenceType: 'textual',
-      evidence: `Textos genéricos: ${components.samples.genericLinks.slice(0, 3).join(', ')}.`,
-      principle: 'rastro de información',
-      title: 'Texto de enlace genérico',
-      insight: `Se detecta texto de enlace genérico como: ${components.samples.genericLinks.slice(0, 3).join(', ')}.`,
-      risk: 'Las etiquetas genéricas reducen escaneabilidad, accesibilidad y confianza antes de navegar.',
-      recommendation: 'Usa textos de enlace orientados al resultado que describan el destino o la acción.',
-      systemImplication: 'Añade guías de contenido para enlaces y etiquetas de navegación.'
-    }));
-  }
-
   if (components.samples.imagesWithoutAlt.length > 0) {
     frictions.push(createFinding({
       block: 'what',
