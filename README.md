@@ -2,11 +2,7 @@
 
 **Contextic** es un bookmarklet de un clic que convierte cualquier página web en un briefing técnico de diseño para diseñadores, desarrolladores y agentes de IA.
 
-Analiza lo que una pantalla ya comunica a través del DOM y los estilos calculados: tokens visuales, patrones UI, componentes, fricciones UX, riesgos de diseño conductual, reglas de implementación y una propuesta behavioral basada en:
-
-```txt
-What → Why → Why not → Who → How → Where → When
-```
+Analiza lo que una pantalla ya comunica a través del DOM y los estilos calculados: tokens visuales, patrones UI, componentes candidatos, fricciones UX y reglas de implementación listas para handoff.
 
 El objetivo no es sustituir el criterio de diseño. El objetivo es reducir ambigüedad antes de modificar una pantalla real.
 
@@ -16,9 +12,18 @@ Diseñadores y desarrolladores suelen modificar interfaces existentes sin docume
 
 Contextic crea una captura rápida de la página actual y la exporta como:
 
-- `briefing-tecnico.md` para revisión de producto/diseño y trabajo con agentes de código,
-- `issue-github.md` para documentar deuda UI/UX,
-- `tokens-contextic.json` para exploración de sistema de diseño y estructura behavioral.
+- `design-context.md` para Cursor, Codex, Claude y documentación de handoff,
+- `contextic-report.json` para inspección estructurada,
+- `github-issue.md` para documentar deuda UI/UX accionable.
+
+## Instalación rápida
+
+1. Abrir la página de instalación:
+   - https://henriq-design.github.io/contextic/
+2. Arrastrar el bookmarklet a la barra de favoritos.
+3. Abrir cualquier página web.
+4. Hacer clic en Contextic.
+5. Copiar el output deseado.
 
 ## Qué detecta el MVP
 
@@ -78,11 +83,14 @@ docs/diseno-conductual/
 
 La carpeta `operativa-ia/` funciona como fuente de verdad para evolucionar Contextic con Codex, Cursor o cualquier agente de código.
 
-## Inicio rápido
+## Uso local
 
 ```bash
 npm install
 npm run build
+npm run build:pages
+npm test
+npm run check
 npm run serve
 ```
 
@@ -92,30 +100,72 @@ Abre:
 http://localhost:5173
 ```
 
-La página de demo carga Contextic automáticamente para que puedas inspeccionar el panel desde el primer momento.
+La página de demo local carga Contextic automáticamente para que puedas inspeccionar el panel desde el primer momento.
+
+## GitHub Pages
+
+Para publicar la página instalable desde este repo, ejecuta:
+
+```bash
+npm run build:pages
+```
+
+El script genera:
+
+```txt
+docs/index.html
+docs/contextic.iife.js
+docs/bookmarklet.txt
+```
+
+La URL pública prevista del bundle es:
+
+```txt
+https://henriq-design.github.io/contextic/contextic.iife.js
+```
+
+Si GitHub Pages todavía no está activado, configúralo en GitHub:
+
+```txt
+Settings → Pages → Source: Deploy from branch → Branch: main → Folder: /docs
+```
+
+## Exports disponibles
+
+- `design-context.md`
+- `contextic-report.json`
+- `github-issue.md`
 
 ## Bookmarklet de producción
 
 Después de ejecutar:
 
 ```bash
-npm run build
+npm run build:pages
 ```
 
 Obtendrás:
 
 ```txt
-dist/contextic.iife.js
-dist/bookmarklet.txt
+docs/contextic.iife.js
+docs/bookmarklet.txt
 ```
 
-Publica `dist/contextic.iife.js` en GitHub Pages u otro alojamiento HTTPS. Después edita la URL del bookmarklet:
+El bookmarklet de `docs/bookmarklet.txt` carga el bundle público:
 
 ```js
-javascript:(()=>{const s=document.createElement('script');s.src='https://TU_USUARIO.github.io/contextic/contextic.iife.js?v='+Date.now();document.documentElement.appendChild(s);})();
+javascript:(()=>{const s=document.createElement('script');s.src='https://henriq-design.github.io/contextic/contextic.iife.js?v='+Date.now();document.documentElement.appendChild(s);})();
 ```
 
 Crea un marcador en el navegador y pega esa URL de una sola línea como ubicación del marcador.
+
+## Limitaciones
+
+- Funciona sobre DOM visible y estilos calculados.
+- No interpreta intención de negocio con certeza.
+- No sustituye revisión humana de producto, diseño o accesibilidad.
+- Algunas inferencias pueden ser aproximadas.
+- Páginas con Shadow DOM, iframes o apps muy dinámicas pueden limitar el análisis.
 
 ## Estructura del repositorio
 
@@ -133,6 +183,9 @@ contextic/
 │  ├─ detect-frictions.js
 │  └─ export-markdown.js
 ├─ docs/
+│  ├─ index.html
+│  ├─ contextic.iife.js
+│  ├─ bookmarklet.txt
 │  └─ diseno-conductual/
 │     ├─ README.md
 │     ├─ heuristicas-conductuales.md
@@ -148,9 +201,11 @@ contextic/
 │  └─ tokens-contextic.ejemplo.json
 ├─ scripts/
 │  ├─ build.mjs
+│  ├─ build-pages.mjs
 │  ├─ make-bookmarklet.mjs
 │  └─ serve.mjs
 ├─ CODEX_CONTEXT.md
+├─ ROADMAP.md
 ├─ README.md
 └─ demo.gif
 ```
@@ -171,44 +226,14 @@ El MVP detecta:
 
 Estas reglas son intencionadamente simples. La siguiente capa debería hacerlas configurables, mejor evidenciadas y menos ruidosas.
 
-## Roadmap sugerido
+## Roadmap
 
-### V0.1
-
-- [x] Escáner de DOM
-- [x] Panel lateral
-- [x] Exportación a Markdown
-- [x] Exportación como issue de GitHub
-- [x] Exportación de snapshot de tokens
-- [x] Build sin dependencias de runtime
-- [x] Base documental de diseño conductual
-- [x] Modelo behavioral de 7 bloques integrado en código
-- [x] Scoring básico P0/P1/P2
-
-### V0.2
-
-- [ ] Reglas behavioral versionadas en JSON/JS independientes de `detect-frictions.js`
-- [ ] Mejor detección de secciones: hero, social proof, FAQ, pricing, stepper, trust bar
-- [ ] Comprobaciones de contraste para pares probables texto/fondo
-- [ ] Mejor detección de variantes de botón
-- [ ] Extracción de variables CSS
-- [ ] Descarga de archivos además de copia al portapapeles
-- [ ] Umbrales configurables
-- [ ] Tests de regresión para reglas conductuales
-
-### V0.3
-
-- [ ] Exportación de tokens compatible con Figma
-- [ ] Puntuación de deuda de sistema de diseño
-- [ ] Inventario de componentes agrupado por variante visual
-- [ ] Prompts opcionales para Codex, Cursor y Claude
-- [ ] Comparación entre varias pantallas de un funnel
-- [ ] Export a Notion, Jira o GitHub Issues
+El roadmap del MVP vive en [`ROADMAP.md`](./ROADMAP.md).
 
 ## Cómo usarlo con Codex o Cursor
 
 1. Ejecuta Contextic sobre una página real.
-2. Copia `briefing-tecnico.md`.
+2. Copia `design-context.md`.
 3. Pégalo en tu agente de código junto con el cambio que quieres hacer.
 4. Pide al agente que preserve las restricciones visuales, sistémicas y behavioral de la captura.
 

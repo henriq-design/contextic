@@ -4,6 +4,8 @@ import path from 'node:path';
 const root = process.cwd();
 const sourceFiles = [
   'src/utils.js',
+  'src/behavioral-finding.js',
+  'src/behavioral-rules.js',
   'src/collect-colors.js',
   'src/collect-typography.js',
   'src/collect-spacing.js',

@@ -1,0 +1,1 @@
+javascript:(()=>{const s=document.createElement('script');s.src='https://henriq-design.github.io/contextic/contextic.iife.js?v='+Date.now();document.documentElement.appendChild(s);})();

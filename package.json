@@ -6,6 +6,7 @@
   "private": false,
   "scripts": {
     "build": "node scripts/build.mjs",
+    "build:pages": "node scripts/build-pages.mjs",
     "make:bookmarklet": "node scripts/make-bookmarklet.mjs",
     "serve": "node scripts/serve.mjs",
     "check": "node --check src/index.js",
