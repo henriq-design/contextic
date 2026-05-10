@@ -1,4 +1,4 @@
-import { buildContexticReport, buildJsonExport as buildContexticJsonExport } from './contextic-report.js';
+import { buildContexticReport } from './contextic-report.js';
 
 export function buildDesignContextMarkdown(snapshot) {
   const meta = snapshot.meta || {};
@@ -95,7 +95,7 @@ ${buildNextExperiment(frictions, behavioralMapping)}
 }
 
 export function buildJsonExport(snapshot) {
-  return buildContexticJsonExport(snapshot);
+  return JSON.stringify(buildContexticReport(snapshot), null, 2);
 }
 
 export function buildGithubIssueExport(input = {}) {

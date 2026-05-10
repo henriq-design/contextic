@@ -24,6 +24,7 @@ test('build:pages generates the GitHub Pages install assets', () => {
   assert.equal(existsSync(indexPath), true);
   assert.match(readFileSync(bundlePath, 'utf8'), /function evaluateBehavioralRules/);
   assert.match(readFileSync(bundlePath, 'utf8'), /function buildContexticReport/);
+  assert.doesNotMatch(readFileSync(bundlePath, 'utf8'), /buildContexticJsonExport/);
   assert.match(readFileSync(bookmarkletPath, 'utf8'), new RegExp(escapeRegExp(publicBundleUrl)));
   assert.match(readFileSync(indexPath, 'utf8'), /Contextic/);
 });

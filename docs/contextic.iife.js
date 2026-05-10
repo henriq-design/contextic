@@ -1949,7 +1949,7 @@ ${buildNextExperiment(frictions, behavioralMapping)}
 }
 
 function buildJsonExport(snapshot) {
-  return buildContexticJsonExport(snapshot);
+  return JSON.stringify(buildContexticReport(snapshot), null, 2);
 }
 
 function buildGithubIssueExport(input = {}) {
