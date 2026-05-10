@@ -12,6 +12,7 @@ const sourceFiles = [
   'src/collect-components.js',
   'src/behavioral-model.js',
   'src/detect-frictions.js',
+  'src/contextic-report.js',
   'src/export-markdown.js',
   'src/index.js'
 ];
