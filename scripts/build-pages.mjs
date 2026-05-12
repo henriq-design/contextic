@@ -13,7 +13,8 @@ await copyFile(path.join(root, 'dist/contextic.iife.js'), path.join(docsDir, 'co
 await writeFile(path.join(docsDir, 'bookmarklet.txt'), bookmarklet, 'utf8');
 
 try {
-  await readFile(path.join(docsDir, 'index.html'), 'utf8');
+  const installPage = await readFile(path.join(docsDir, 'index.html'), 'utf8');
+  await writeFile(path.join(docsDir, 'index.html'), refreshBookmarkletUrl(installPage, bookmarklet), 'utf8');
 } catch {
   await writeFile(path.join(docsDir, 'index.html'), buildInstallPage(bookmarklet), 'utf8');
 }
@@ -39,4 +40,11 @@ function buildInstallPage(bookmarkletUrl) {
   </body>
 </html>
 `;
+}
+
+function refreshBookmarkletUrl(source, bookmarkletUrl) {
+  return source.replace(
+    /href="javascript:\(\(\)=>\{const s=document\.createElement\('script'\);s\.async=true;s\.onerror=\(\)=>alert\('Contextic no pudo cargar: esta pagina puede bloquear scripts externos \(CSP\)\.'\);s\.src='https:\/\/henriq-design\.github\.io\/contextic\/contextic\.iife\.js\?v='\+Date\.now\(\);document\.documentElement\.appendChild\(s\);\}\)\(\);"/g,
+    `href="${bookmarkletUrl}"`
+  );
 }
