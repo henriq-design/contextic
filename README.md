@@ -144,6 +144,7 @@ También puedes pegar `github-issue.md` directamente en GitHub Issues o Jira com
 - No ve intención de negocio con certeza.
 - No sustituye revisión humana de producto, diseño o accesibilidad.
 - Puede fallar o ver menos información en páginas con Shadow DOM, iframes o apps muy dinámicas.
+- Algunas páginas bloquean bookmarklets que cargan scripts externos mediante Content Security Policy (CSP); en ese caso el panel no puede arrancar desde GitHub Pages.
 - Algunas inferencias son aproximadas.
 - Behavioral es una capa de apoyo dentro de UX Friction Notes, no una verdad absoluta.
 

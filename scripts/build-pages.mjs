@@ -6,7 +6,7 @@ import './build.mjs';
 const root = process.cwd();
 const docsDir = path.join(root, 'docs');
 const publicBundleUrl = 'https://henriq-design.github.io/contextic/contextic.iife.js';
-const bookmarklet = `javascript:(()=>{const s=document.createElement('script');s.src='${publicBundleUrl}?v='+Date.now();document.documentElement.appendChild(s);})();`;
+const bookmarklet = `javascript:(()=>{const s=document.createElement('script');s.async=true;s.onerror=()=>alert('Contextic no pudo cargar: esta pagina puede bloquear scripts externos (CSP).');s.src='${publicBundleUrl}?v='+Date.now();document.documentElement.appendChild(s);})();`;
 
 await mkdir(docsDir, { recursive: true });
 await copyFile(path.join(root, 'dist/contextic.iife.js'), path.join(docsDir, 'contextic.iife.js'));

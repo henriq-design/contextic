@@ -60,8 +60,8 @@ function renderPanel(snapshot) {
   const jsonReport = buildJsonExport(snapshot);
   const githubIssue = buildGithubIssueExport(snapshot);
 
-  shadow.innerHTML = `
-    <style>
+  const style = document.createElement('style');
+  style.textContent = `
       :host {
         all: initial;
         position: fixed;
@@ -207,84 +207,115 @@ function renderPanel(snapshot) {
         color: #6b7280;
         margin: 0;
       }
-    </style>
-    <div class="panel" role="dialog" aria-modal="false">
-      <header>
-        <div>
-          <h2>Contextic</h2>
-          <p class="subtitle">Contexto técnico de diseño listo para IA y handoff.</p>
-        </div>
-        <button class="close" type="button" aria-label="Cerrar panel">×</button>
-      </header>
-      <div class="body">
-        <div class="grid">
-          ${metric('Colores', snapshot.colors.totalUniqueColors)}
-          ${metric('Estilos tipográficos', snapshot.typography.totalUniqueTypeStyles)}
-          ${metric('Valores de espaciado', snapshot.spacing.totalUniqueSpacingValues)}
-          ${metric('Fricciones', snapshot.frictions.length)}
-          ${metric('Bloques débiles', snapshot.behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).length)}
-        </div>
-
-        <h3>Colores principales</h3>
-        <div class="swatches">
-          ${snapshot.colors.colors.slice(0, 8).map(color => `
-            <div class="swatch">
-              <span class="swatch-chip" style="background:${color.value}"></span>
-              <span>${color.value}</span>
-              <span>${color.count}</span>
-            </div>
-          `).join('') || '<p class="notice">No se detectan colores.</p>'}
-        </div>
-
-        <h3>Conteo de componentes</h3>
-        <p class="notice">Botones ${snapshot.components.counts.buttons} · Inputs ${snapshot.components.counts.inputs} · Enlaces ${snapshot.components.counts.links} · Tarjetas ${snapshot.components.counts.cards}</p>
-
-        <h3>Mapa behavioral</h3>
-        <p class="notice">${snapshot.behavioralMapping.map(block => `${block.label}: ${block.present} (${block.quality}/5)`).join(' · ')}</p>
-
-        <h3>Lente conductual</h3>
-        ${snapshot.frictions.slice(0, 5).map(friction => `
-          <div class="friction">
-            <strong>${escapeHtml(friction.title)} · ${escapeHtml(friction.severity)}</strong>
-            <p>${escapeHtml(friction.principle || 'revisión heurística')} · ${escapeHtml(friction.recommendation)}</p>
-          </div>
-        `).join('') || '<p class="notice">No se detectan fricciones heurísticas relevantes. Se recomienda revisión manual.</p>'}
-      </div>
-      <div class="actions">
-        <button class="copy" type="button" data-copy="design">Copiar design-context.md</button>
-        <button class="copy secondary" type="button" data-copy="json">Copiar JSON</button>
-        <button class="copy secondary" type="button" data-copy="issue">Copiar GitHub Issue</button>
-        <p class="notice" data-copy-status>Salida heurística. Úsala como apoyo de revisión de producto/diseño, no como verdad absoluta.</p>
-      </div>
-    </div>
   `;
 
-  shadow.querySelector('.close').addEventListener('click', () => host.remove());
-  shadow.querySelectorAll('[data-copy]').forEach(button => {
+  const closeButton = element('button', {
+    class: 'close',
+    type: 'button',
+    'aria-label': 'Cerrar panel'
+  }, ['×']);
+
+  const grid = element('div', { class: 'grid' }, [
+    metric('Colores', snapshot.colors.totalUniqueColors),
+    metric('Estilos tipográficos', snapshot.typography.totalUniqueTypeStyles),
+    metric('Valores de espaciado', snapshot.spacing.totalUniqueSpacingValues),
+    metric('Fricciones', snapshot.frictions.length),
+    metric('Bloques débiles', snapshot.behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).length)
+  ]);
+
+  const swatches = element('div', { class: 'swatches' });
+  for (const color of snapshot.colors.colors.slice(0, 8)) {
+    swatches.appendChild(element('div', { class: 'swatch' }, [
+      element('span', { class: 'swatch-chip', style: { background: color.value } }),
+      element('span', {}, [color.value]),
+      element('span', {}, [String(color.count)])
+    ]));
+  }
+  if (!swatches.childElementCount) {
+    swatches.appendChild(element('p', { class: 'notice' }, ['No se detectan colores.']));
+  }
+
+  const frictionNodes = snapshot.frictions.slice(0, 5).map(friction => element('div', { class: 'friction' }, [
+    element('strong', {}, [`${friction.title} · ${friction.severity}`]),
+    element('p', {}, [`${friction.principle || 'revisión heurística'} · ${friction.recommendation}`])
+  ]));
+
+  const body = element('div', { class: 'body' }, [
+    grid,
+    element('h3', {}, ['Colores principales']),
+    swatches,
+    element('h3', {}, ['Conteo de componentes']),
+    element('p', { class: 'notice' }, [`Botones ${snapshot.components.counts.buttons} · Inputs ${snapshot.components.counts.inputs} · Enlaces ${snapshot.components.counts.links} · Tarjetas ${snapshot.components.counts.cards}`]),
+    element('h3', {}, ['Mapa behavioral']),
+    element('p', { class: 'notice' }, [snapshot.behavioralMapping.map(block => `${block.label}: ${block.present} (${block.quality}/5)`).join(' · ')]),
+    element('h3', {}, ['Lente conductual']),
+    ...(frictionNodes.length ? frictionNodes : [
+      element('p', { class: 'notice' }, ['No se detectan fricciones heurísticas relevantes. Se recomienda revisión manual.'])
+    ])
+  ]);
+
+  const copyButtons = [
+    element('button', { class: 'copy', type: 'button', 'data-copy': 'design' }, ['Copiar design-context.md']),
+    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'json' }, ['Copiar JSON']),
+    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'issue' }, ['Copiar GitHub Issue'])
+  ];
+
+  const copyStatus = element('p', { class: 'notice', 'data-copy-status': '' }, [
+    'Salida heurística. Úsala como apoyo de revisión de producto/diseño, no como verdad absoluta.'
+  ]);
+
+  const panel = element('div', { class: 'panel', role: 'dialog', 'aria-modal': 'false' }, [
+    element('header', {}, [
+      element('div', {}, [
+        element('h2', {}, ['Contextic']),
+        element('p', { class: 'subtitle' }, ['Contexto técnico de diseño listo para IA y handoff.'])
+      ]),
+      closeButton
+    ]),
+    body,
+    element('div', { class: 'actions' }, [...copyButtons, copyStatus])
+  ]);
+
+  shadow.append(style, panel);
+
+  closeButton.addEventListener('click', () => host.remove());
+  copyButtons.forEach(button => {
     button.addEventListener('click', async () => {
       const key = button.getAttribute('data-copy');
       const payload = key === 'design' ? designContext : key === 'json' ? jsonReport : githubIssue;
       const copied = await copyToClipboard(payload);
-      const status = shadow.querySelector('[data-copy-status]');
       const previous = button.textContent;
       button.textContent = copied ? 'Copiado' : 'No se pudo copiar';
-      if (status) status.textContent = copied ? 'Copiado al portapapeles.' : 'No se pudo copiar automáticamente.';
+      copyStatus.textContent = copied ? 'Copiado al portapapeles.' : 'No se pudo copiar automáticamente.';
       setTimeout(() => { button.textContent = previous; }, 1200);
     });
   });
 }
 
 function metric(label, value) {
-  return `<div class="metric"><strong>${value}</strong><span>${label}</span></div>`;
+  return element('div', { class: 'metric' }, [
+    element('strong', {}, [String(value)]),
+    element('span', {}, [label])
+  ]);
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+function element(tagName, attributes = {}, children = []) {
+  const node = document.createElement(tagName);
+
+  for (const [name, value] of Object.entries(attributes)) {
+    if (value === null || value === undefined) continue;
+    if (name === 'style' && typeof value === 'object') {
+      Object.assign(node.style, value);
+    } else {
+      node.setAttribute(name, String(value));
+    }
+  }
+
+  for (const child of children) {
+    node.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+
+  return node;
 }
 
 async function copyToClipboard(value) {

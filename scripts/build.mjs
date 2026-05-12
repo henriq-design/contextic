@@ -34,7 +34,7 @@ const bundle = `(() => {\n'use strict';\n${chunks.join('\n\n')}\n})();\n`;
 await mkdir(path.join(root, 'dist'), { recursive: true });
 await writeFile(path.join(root, 'dist/contextic.iife.js'), bundle, 'utf8');
 
-const bookmarklet = `javascript:(()=>{const s=document.createElement('script');s.src='https://TU_USUARIO.github.io/contextic/contextic.iife.js?v='+Date.now();document.documentElement.appendChild(s);})();`;
+const bookmarklet = `javascript:(()=>{const s=document.createElement('script');s.async=true;s.onerror=()=>alert('Contextic no pudo cargar: esta pagina puede bloquear scripts externos (CSP).');s.src='https://TU_USUARIO.github.io/contextic/contextic.iife.js?v='+Date.now();document.documentElement.appendChild(s);})();`;
 await writeFile(path.join(root, 'dist/bookmarklet.txt'), bookmarklet, 'utf8');
 
 console.log('Generado dist/contextic.iife.js');

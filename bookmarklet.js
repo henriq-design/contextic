@@ -4,4 +4,4 @@
 // 3. Sustituye TU_USUARIO por tu usuario de GitHub.
 // 4. Crea un marcador en el navegador y pega la URL javascript: de una sola línea como ubicación.
 
-javascript:(()=>{const s=document.createElement('script');s.src='https://TU_USUARIO.github.io/contextic/contextic.iife.js?v='+Date.now();document.documentElement.appendChild(s);})();
+javascript:(()=>{const s=document.createElement('script');s.async=true;s.onerror=()=>alert('Contextic no pudo cargar: esta pagina puede bloquear scripts externos (CSP).');s.src='https://TU_USUARIO.github.io/contextic/contextic.iife.js?v='+Date.now();document.documentElement.appendChild(s);})();
