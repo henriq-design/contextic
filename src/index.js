@@ -66,109 +66,284 @@ function renderPanel(snapshot) {
         all: initial;
         position: fixed;
         z-index: 2147483647;
-        inset: 16px 16px 16px auto;
-        width: min(460px, calc(100vw - 32px));
+        inset: 14px 14px 14px auto;
+        width: min(448px, calc(100vw - 28px));
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: #111827;
+        color: #151515;
       }
       * { box-sizing: border-box; }
       .panel {
         height: 100%;
-        background: #ffffff;
-        border: 1px solid #d1d5db;
-        border-radius: 16px;
-        box-shadow: 0 24px 80px rgba(17, 24, 39, 0.24);
+        background: #f6f8f7;
+        border: 1px solid #d7ded8;
+        border-radius: 10px;
+        box-shadow: 0 28px 90px rgba(22, 34, 28, 0.26);
         overflow: hidden;
         display: flex;
         flex-direction: column;
       }
-      header {
-        padding: 16px;
-        border-bottom: 1px solid #e5e7eb;
+      .panel-header {
+        padding: 18px;
+        border-bottom: 1px solid #d7ded8;
+        background: #ffffff;
         display: flex;
-        gap: 12px;
-        align-items: start;
+        gap: 14px;
+        align-items: center;
         justify-content: space-between;
       }
-      h2 {
+      .brand {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        min-width: 0;
+      }
+      .brand-mark {
+        display: inline-grid;
+        flex: 0 0 auto;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 8px;
+        background: #151515;
+        color: #ffffff;
+        font-size: 17px;
+        font-weight: 850;
+        line-height: 20px;
+      }
+      .kicker {
+        margin: 0 0 2px;
+        color: #075f4d;
+        font-size: 11px;
+        font-weight: 850;
+        line-height: 16px;
+        text-transform: uppercase;
+      }
+      h2,
+      h3 {
         margin: 0;
-        font-size: 16px;
+      }
+      h2 {
+        color: #151515;
+        font-size: 18px;
         line-height: 24px;
-        font-weight: 750;
+        font-weight: 850;
       }
       .subtitle {
-        margin: 4px 0 0;
+        margin: 2px 0 0;
         font-size: 12px;
         line-height: 18px;
-        color: #4b5563;
+        color: #5f6761;
       }
       .close {
         border: 0;
         border-radius: 8px;
-        padding: 8px 10px;
-        background: #f3f4f6;
+        width: 36px;
+        height: 36px;
+        background: #eef4f0;
+        color: #151515;
         cursor: pointer;
         font: inherit;
+        font-size: 18px;
+        line-height: 18px;
       }
       .body {
         overflow: auto;
-        padding: 16px;
+        padding: 14px;
+      }
+      .hero-summary {
+        display: grid;
+        grid-template-columns: 116px minmax(0, 1fr);
+        gap: 12px;
+        align-items: stretch;
+        margin-bottom: 12px;
+      }
+      .score {
+        display: grid;
+        place-items: center;
+        min-height: 104px;
+        border: 1px solid #d7ded8;
+        border-radius: 8px;
+        background: #151515;
+        color: #ffffff;
+        text-align: center;
+      }
+      .score strong {
+        display: block;
+        font-size: 38px;
+        line-height: 42px;
+        font-weight: 900;
+      }
+      .score span {
+        display: block;
+        margin-top: 2px;
+        color: rgba(255, 255, 255, .76);
+        font-size: 11px;
+        font-weight: 750;
+        line-height: 16px;
+        text-transform: uppercase;
+      }
+      .summary-copy {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 104px;
+        border: 1px solid #d7ded8;
+        border-radius: 8px;
+        padding: 14px;
+        background: #ffffff;
+      }
+      .summary-copy strong {
+        color: #151515;
+        font-size: 15px;
+        line-height: 21px;
+      }
+      .summary-copy p {
+        margin: 6px 0 0;
+        color: #5f6761;
+        font-size: 12px;
+        line-height: 18px;
       }
       .grid {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
-        margin-bottom: 16px;
+        margin-bottom: 12px;
       }
       .metric {
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 12px;
-        background: #f9fafb;
+        min-height: 72px;
+        border: 1px solid #d7ded8;
+        border-radius: 8px;
+        padding: 11px 12px;
+        background: #ffffff;
       }
       .metric strong {
         display: block;
-        font-size: 20px;
+        color: #151515;
+        font-size: 24px;
         line-height: 28px;
+        font-weight: 850;
       }
       .metric span {
-        font-size: 12px;
-        color: #4b5563;
+        display: block;
+        margin-top: 3px;
+        font-size: 11px;
+        line-height: 16px;
+        color: #5f6761;
       }
-      h3 {
-        margin: 18px 0 8px;
-        font-size: 13px;
+      .section {
+        border-top: 1px solid #d7ded8;
+        padding: 16px 0 0;
+        margin-top: 16px;
+      }
+      .section-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+        color: #151515;
+        font-size: 12px;
+        font-weight: 850;
         line-height: 18px;
         text-transform: uppercase;
-        letter-spacing: .06em;
-        color: #374151;
+      }
+      .section-title span {
+        color: #7a837b;
+        font-weight: 750;
       }
       .swatches {
         display: grid;
-        gap: 8px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 7px;
       }
       .swatch {
         display: grid;
-        grid-template-columns: 28px 1fr auto;
+        grid-template-columns: 28px minmax(0, 1fr);
         align-items: center;
-        gap: 8px;
-        font-size: 12px;
+        gap: 9px;
+        min-width: 0;
+        border: 1px solid #d7ded8;
+        border-radius: 8px;
+        padding: 8px;
+        background: #ffffff;
       }
       .swatch-chip {
         width: 28px;
         height: 28px;
-        border-radius: 8px;
+        border-radius: 7px;
         border: 1px solid rgba(0,0,0,.12);
       }
-      .friction {
-        border-left: 4px solid #111827;
-        background: #f9fafb;
-        padding: 10px 12px;
+      .swatch-code {
+        display: block;
+        overflow: hidden;
+        color: #151515;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 16px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .swatch-role {
+        display: block;
+        overflow: hidden;
+        color: #7a837b;
+        font-size: 11px;
+        line-height: 15px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .component-line,
+      .mapping-row {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        border: 1px solid #d7ded8;
         border-radius: 8px;
-        margin-bottom: 8px;
+        padding: 10px 11px;
+        background: #ffffff;
+        color: #151515;
+        font-size: 12px;
+        line-height: 17px;
+      }
+      .mapping-list {
+        display: grid;
+        gap: 7px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 24px;
+        padding: 0 9px;
+        border-radius: 999px;
+        background: #eef4f0;
+        color: #075f4d;
+        font-size: 11px;
+        font-weight: 850;
+        line-height: 16px;
+        white-space: nowrap;
+      }
+      .friction {
+        border: 1px solid #d7ded8;
+        border-left: 5px solid #0e7c66;
+        background: #ffffff;
+        padding: 11px 12px;
+        border-radius: 8px;
+        margin-bottom: 7px;
+      }
+      .friction.severity-alta,
+      .friction.severity-critica {
+        border-left-color: #c94d3f;
+      }
+      .friction.severity-media {
+        border-left-color: #d99b2b;
       }
       .friction strong {
-        display: block;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+        color: #151515;
         font-size: 13px;
         line-height: 18px;
       }
@@ -176,36 +351,57 @@ function renderPanel(snapshot) {
         margin: 4px 0 0;
         font-size: 12px;
         line-height: 18px;
-        color: #4b5563;
+        color: #5f6761;
       }
       .actions {
         display: grid;
         gap: 8px;
-        padding: 16px;
-        border-top: 1px solid #e5e7eb;
+        padding: 12px 14px 14px;
+        border-top: 1px solid #d7ded8;
         background: #ffffff;
+      }
+      .secondary-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
       }
       button.copy {
         width: 100%;
         border: 0;
-        border-radius: 12px;
-        padding: 11px 12px;
-        background: #111827;
+        border-radius: 8px;
+        padding: 12px 12px;
+        background: #151515;
         color: white;
         font: inherit;
         font-size: 13px;
-        font-weight: 700;
+        font-weight: 850;
         cursor: pointer;
       }
       button.copy.secondary {
-        background: #f3f4f6;
-        color: #111827;
+        background: #eef4f0;
+        color: #151515;
       }
       .notice {
         font-size: 11px;
         line-height: 16px;
-        color: #6b7280;
+        color: #7a837b;
         margin: 0;
+      }
+      @media (max-width: 520px) {
+        :host {
+          inset: 10px;
+          width: auto;
+        }
+        .hero-summary {
+          grid-template-columns: 1fr;
+        }
+        .score {
+          min-height: 86px;
+        }
+        .swatches,
+        .secondary-actions {
+          grid-template-columns: 1fr;
+        }
       }
   `;
 
@@ -215,47 +411,90 @@ function renderPanel(snapshot) {
     'aria-label': 'Cerrar panel'
   }, ['×']);
 
+  const weakBlocksCount = snapshot.behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).length;
+  const summaryText = snapshot.frictions.length
+    ? `${snapshot.frictions.length} señales para revisar antes del handoff.`
+    : 'La pantalla no muestra fricciones heurísticas relevantes.';
+  const componentSummary = `Botones ${snapshot.components.counts.buttons} · Inputs ${snapshot.components.counts.inputs} · Enlaces ${snapshot.components.counts.links} · Tarjetas ${snapshot.components.counts.cards}`;
+
+  const heroSummary = element('div', { class: 'hero-summary' }, [
+    element('div', { class: 'score' }, [
+      element('div', {}, [
+        element('strong', {}, [String(snapshot.frictions.length)]),
+        element('span', {}, ['Fricciones'])
+      ])
+    ]),
+    element('div', { class: 'summary-copy' }, [
+      element('strong', {}, [summaryText]),
+      element('p', {}, [`${snapshot.meta.title || 'Pantalla actual'} · ${snapshot.meta.viewport.width}×${snapshot.meta.viewport.height}`])
+    ])
+  ]);
+
   const grid = element('div', { class: 'grid' }, [
     metric('Colores', snapshot.colors.totalUniqueColors),
-    metric('Estilos tipográficos', snapshot.typography.totalUniqueTypeStyles),
-    metric('Valores de espaciado', snapshot.spacing.totalUniqueSpacingValues),
-    metric('Fricciones', snapshot.frictions.length),
-    metric('Bloques débiles', snapshot.behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).length)
+    metric('Tipografías', snapshot.typography.totalUniqueTypeStyles),
+    metric('Espaciados', snapshot.spacing.totalUniqueSpacingValues),
+    metric('Bloques débiles', weakBlocksCount)
   ]);
 
   const swatches = element('div', { class: 'swatches' });
   for (const color of snapshot.colors.colors.slice(0, 8)) {
     swatches.appendChild(element('div', { class: 'swatch' }, [
       element('span', { class: 'swatch-chip', style: { background: color.value } }),
-      element('span', {}, [color.value]),
-      element('span', {}, [String(color.count)])
+      element('span', {}, [
+        element('span', { class: 'swatch-code' }, [color.value]),
+        element('span', { class: 'swatch-role' }, [`${color.suggestedRole || 'unknown'} · ${color.count}`])
+      ])
     ]));
   }
   if (!swatches.childElementCount) {
     swatches.appendChild(element('p', { class: 'notice' }, ['No se detectan colores.']));
   }
 
-  const frictionNodes = snapshot.frictions.slice(0, 5).map(friction => element('div', { class: 'friction' }, [
-    element('strong', {}, [`${friction.title} · ${friction.severity}`]),
+  const mappingRows = snapshot.behavioralMapping.map(block => element('div', { class: 'mapping-row' }, [
+    element('span', {}, [block.label]),
+    element('span', { class: 'pill' }, [`${block.present} · ${block.quality}/5`])
+  ]));
+
+  const frictionNodes = snapshot.frictions.slice(0, 5).map(friction => element('div', { class: `friction ${severityClass(friction.severity)}` }, [
+    element('strong', {}, [
+      element('span', {}, [friction.title]),
+      element('span', { class: 'pill' }, [friction.severity])
+    ]),
     element('p', {}, [`${friction.principle || 'revisión heurística'} · ${friction.recommendation}`])
   ]));
 
   const body = element('div', { class: 'body' }, [
+    heroSummary,
     grid,
-    element('h3', {}, ['Colores principales']),
-    swatches,
-    element('h3', {}, ['Conteo de componentes']),
-    element('p', { class: 'notice' }, [`Botones ${snapshot.components.counts.buttons} · Inputs ${snapshot.components.counts.inputs} · Enlaces ${snapshot.components.counts.links} · Tarjetas ${snapshot.components.counts.cards}`]),
-    element('h3', {}, ['Mapa behavioral']),
-    element('p', { class: 'notice' }, [snapshot.behavioralMapping.map(block => `${block.label}: ${block.present} (${block.quality}/5)`).join(' · ')]),
-    element('h3', {}, ['Lente conductual']),
-    ...(frictionNodes.length ? frictionNodes : [
-      element('p', { class: 'notice' }, ['No se detectan fricciones heurísticas relevantes. Se recomienda revisión manual.'])
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, [
+        'Colores principales',
+        element('span', {}, [`${snapshot.colors.colors.length} muestras`])
+      ]),
+      swatches
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Componentes']),
+      element('div', { class: 'component-line' }, [
+        element('span', {}, [componentSummary]),
+        element('span', { class: 'pill' }, [`${snapshot.components.counts.ctaGroups} CTA groups`])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Mapa behavioral']),
+      element('div', { class: 'mapping-list' }, mappingRows)
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Lente conductual']),
+      ...(frictionNodes.length ? frictionNodes : [
+        element('p', { class: 'notice' }, ['No se detectan fricciones heurísticas relevantes. Se recomienda revisión manual.'])
+      ])
     ])
   ]);
 
   const copyButtons = [
-    element('button', { class: 'copy', type: 'button', 'data-copy': 'design' }, ['Copiar design-context.md']),
+    element('button', { class: 'copy primary', type: 'button', 'data-copy': 'design' }, ['Copiar design-context.md']),
     element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'json' }, ['Copiar JSON']),
     element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'issue' }, ['Copiar GitHub Issue'])
   ];
@@ -265,15 +504,23 @@ function renderPanel(snapshot) {
   ]);
 
   const panel = element('div', { class: 'panel', role: 'dialog', 'aria-modal': 'false' }, [
-    element('header', {}, [
-      element('div', {}, [
-        element('h2', {}, ['Contextic']),
-        element('p', { class: 'subtitle' }, ['Contexto técnico de diseño listo para IA y handoff.'])
+    element('header', { class: 'panel-header' }, [
+      element('div', { class: 'brand' }, [
+        element('span', { class: 'brand-mark' }, ['C']),
+        element('div', {}, [
+          element('p', { class: 'kicker' }, ['Design context']),
+          element('h2', {}, ['Contextic']),
+          element('p', { class: 'subtitle' }, ['Tokens, componentes y fricciones listas para handoff.'])
+        ])
       ]),
       closeButton
     ]),
     body,
-    element('div', { class: 'actions' }, [...copyButtons, copyStatus])
+    element('div', { class: 'actions' }, [
+      copyButtons[0],
+      element('div', { class: 'secondary-actions' }, [copyButtons[1], copyButtons[2]]),
+      copyStatus
+    ])
   ]);
 
   shadow.append(style, panel);
@@ -297,6 +544,14 @@ function metric(label, value) {
     element('strong', {}, [String(value)]),
     element('span', {}, [label])
   ]);
+}
+
+function severityClass(severity = '') {
+  const normalized = String(severity).toLowerCase();
+  if (normalized.includes('cr')) return 'severity-critica';
+  if (normalized.includes('alt')) return 'severity-alta';
+  if (normalized.includes('med')) return 'severity-media';
+  return 'severity-baja';
 }
 
 function element(tagName, attributes = {}, children = []) {
