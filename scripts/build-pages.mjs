@@ -6,10 +6,27 @@ import './build.mjs';
 const root = process.cwd();
 const docsDir = path.join(root, 'docs');
 const publicBundleUrl = 'https://henriq-design.github.io/contextic/contextic.iife.js';
+const faviconAssets = [
+  'apple-touch-icon.png',
+  'contextic-logo.svg',
+  'favicon-16x16.png',
+  'favicon-32x32.png',
+  'favicon-48x48.png',
+  'favicon.ico',
+  'favicon.svg',
+  'icon-192x192.png',
+  'icon-256x256.png',
+  'icon-512x512.png',
+  'icon-1024x1024.png',
+  'site.webmanifest'
+];
 const bookmarklet = `javascript:(()=>{const s=document.createElement('script');s.async=true;s.onerror=()=>alert('Contextic no pudo cargar: esta pagina puede bloquear scripts externos (CSP).');s.src='${publicBundleUrl}?v='+Date.now();document.documentElement.appendChild(s);})();`;
 
 await mkdir(docsDir, { recursive: true });
 await copyFile(path.join(root, 'dist/contextic.iife.js'), path.join(docsDir, 'contextic.iife.js'));
+await Promise.all(
+  faviconAssets.map((asset) => copyFile(path.join(root, asset), path.join(docsDir, asset)))
+);
 await writeFile(path.join(docsDir, 'bookmarklet.txt'), bookmarklet, 'utf8');
 
 try {
@@ -29,6 +46,13 @@ function buildInstallPage(bookmarkletUrl) {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="./favicon.ico" sizes="any">
+    <link rel="icon" href="./favicon-32x32.png" type="image/png" sizes="32x32">
+    <link rel="icon" href="./favicon-16x16.png" type="image/png" sizes="16x16">
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" sizes="180x180">
+    <link rel="manifest" href="./site.webmanifest">
+    <meta name="theme-color" content="#74E3FC">
     <title>Contextic</title>
   </head>
   <body>
