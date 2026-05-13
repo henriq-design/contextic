@@ -811,11 +811,13 @@ function normalizeText(text) {
 // ---- src/collect-colors.js ----
 
 const COLOR_PROPERTIES = ['color', 'backgroundColor', 'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor', 'outlineColor'];
+const COLOR_ROLES = new Set(['text', 'surface', 'brand', 'primary', 'secondary', 'accent', 'border', 'focus', 'error', 'success', 'warning', 'info', 'utility', 'unknown']);
 
 function collectColors(root = document.body, options = {}) {
   const limit = options.limit || 16;
   const colorUsage = new Map();
   const colorSamples = new Map();
+  const colorContexts = new Map();
   const cssVariables = collectCssVariables();
 
   for (const element of getCandidateElements(root)) {
@@ -824,15 +826,19 @@ function collectColors(root = document.body, options = {}) {
     for (const property of COLOR_PROPERTIES) {
       const normalized = normalizeColor(style[property]);
       if (!normalized) continue;
+      const context = buildColorContext(element, property);
 
       // Los fondos y colores de texto suelen ser más relevantes que bordes repetidos por defecto.
-      const weight = property === 'backgroundColor' || property === 'color' ? 2 : 1;
+      const weight = context.region === 'hidden_or_system' ? 0.25 : property === 'backgroundColor' || property === 'color' ? 2 : 1;
       incrementMap(colorUsage, normalized, weight);
+      if (!colorContexts.has(normalized)) colorContexts.set(normalized, []);
+      colorContexts.get(normalized).push(context);
 
       if (!colorSamples.has(normalized)) {
         colorSamples.set(normalized, {
           selector: readableSelector(element),
-          property
+          property,
+          context
         });
       }
     }
@@ -840,12 +846,15 @@ function collectColors(root = document.body, options = {}) {
 
   const colors = topFromMap(colorUsage, limit).map(item => {
     const sample = colorSamples.get(item.value);
-    const role = guessColorRole(item.value, item.count, sample?.property);
+    const contexts = colorContexts.get(item.value) || [];
+    const role = guessColorRole(item.value, item.count, contexts, cssVariables);
     return {
       ...item,
       sample,
+      usages: contexts.slice(0, 8),
       suggestedRole: role.role,
-      roleConfidence: role.confidence
+      roleConfidence: role.confidence,
+      roleReason: role.reason
     };
   });
 
@@ -860,6 +869,73 @@ function readableSelector(element) {
   const id = element.id ? `#${element.id}` : '';
   const classes = Array.from(element.classList || []).slice(0, 2).map(name => `.${name}`).join('');
   return `${element.tagName.toLowerCase()}${id}${classes}` || element.tagName.toLowerCase();
+}
+
+function buildColorContext(element, property) {
+  const selector = readableSelector(element);
+  const region = classifyElementRegion(element);
+  const componentType = inferComponentType(element);
+  const visible = region !== 'hidden_or_system';
+  const interactive = isInteractive(element);
+  const appearsInCta = interactive && isMainAction(element);
+  const validationContext = inferValidationContext(element);
+
+  return {
+    property,
+    selector,
+    componentType,
+    region,
+    visible,
+    interactive,
+    appearsInCta,
+    validationContext
+  };
+}
+
+function inferComponentType(element) {
+  const tag = element.tagName.toLowerCase();
+  const role = String(element.getAttribute?.('role') || '').toLowerCase();
+  const classAndId = elementDescriptor(element);
+  if (tag === 'button' || role === 'button' || (tag === 'a' && /\b(btn|button|cta)\b/.test(classAndId))) return 'button';
+  if (tag === 'a') return 'link';
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return 'form_field';
+  if (tag === 'form') return 'form';
+  if (tag === 'nav' || role === 'navigation') return 'navigation';
+  if (role === 'alert' || role === 'status') return 'alert';
+  if (/\b(card)\b/.test(classAndId)) return 'card';
+  if (/\b(logo|brand)\b/.test(classAndId)) return 'brand_asset';
+  return 'static';
+}
+
+function isInteractive(element) {
+  const tag = element.tagName.toLowerCase();
+  const role = String(element.getAttribute?.('role') || '').toLowerCase();
+  return tag === 'button' || tag === 'a' || tag === 'input' || tag === 'select' || tag === 'textarea' || role === 'button' || Boolean(element.getAttribute?.('tabindex'));
+}
+
+function isMainAction(element) {
+  const descriptor = elementDescriptor(element);
+  const text = String(element.textContent || element.getAttribute?.('aria-label') || '').toLowerCase();
+  return /\b(cta|primary|main-action|hero|button|btn|brand)\b/.test(descriptor) || /\b(comprar|contratar|empezar|crear|solicitar|contactar|get started|buy|start|sign up|request)\b/.test(text);
+}
+
+function inferValidationContext(element) {
+  const descriptor = elementDescriptor(element);
+  const role = String(element.getAttribute?.('role') || '').toLowerCase();
+  const ariaInvalid = element.getAttribute?.('aria-invalid') === 'true';
+  const text = String(element.textContent || '').toLowerCase();
+
+  if (ariaInvalid || role === 'alert' || /\b(error|invalid|danger|destructive|delete|remove|eliminar|borrar)\b/.test(descriptor + ' ' + text)) return 'error';
+  if (role === 'status' || /\b(success|valid|confirmation|confirmed|completed|complete|ok|done|exito|éxito|confirmado|completado)\b/.test(descriptor + ' ' + text)) return 'success';
+  if (/\b(warning|warn|alerta|aviso)\b/.test(descriptor + ' ' + text)) return 'warning';
+  if (/\b(info|notice|help|ayuda)\b/.test(descriptor + ' ' + text)) return 'info';
+  return 'none';
+}
+
+function elementDescriptor(element) {
+  const id = element.id || '';
+  const classes = Array.from(element.classList || []).join(' ');
+  return `${id} ${classes}`.toLowerCase();
 }
 
 function collectCssVariables() {
@@ -908,20 +984,49 @@ function looksLikeColorValue(value) {
   );
 }
 
-function guessColorRole(hex, count, property = '') {
+function guessColorRole(hex, count, contexts = [], cssVariables = []) {
   const { r, g, b } = hexToRgb(hex);
   const luminance = relativeLuminance(r, g, b);
   const saturation = colorSaturation(r, g, b);
+  const relevantContexts = contexts.filter(context => context.visible && context.region !== 'hidden_or_system');
+  const variableHints = cssVariables.filter(variable => normalizeColor(variable.value) === hex).map(variable => variable.name.toLowerCase());
 
-  if (property.toLowerCase().includes('border') && saturation < 0.18) return { role: 'border', confidence: 'possible' };
-  if (luminance > 0.92 && count > 8) return { role: 'surface', confidence: 'likely' };
-  if (luminance < 0.12 && count > 8) return { role: 'text', confidence: 'likely' };
-  if (r > 180 && g < 100 && b < 110) return { role: 'error', confidence: 'possible' };
-  if (g > 120 && r < 140 && b < 150) return { role: 'success', confidence: 'possible' };
-  if (r > 190 && g > 120 && b < 90) return { role: 'warning', confidence: 'possible' };
-  if (b > 150 && r < 140 && g > 90) return { role: 'info', confidence: 'possible' };
-  if (saturation > 0.35 && count > 1) return { role: 'primary', confidence: 'possible' };
-  return { role: 'unknown', confidence: 'unknown' };
+  if (!relevantContexts.length) return role('utility', 'low', 'Only observed in hidden/system or utility contexts.');
+
+  if (hasValidationContext(relevantContexts, 'error')) return role('error', 'high', 'Used in explicit error/invalid/destructive context.');
+  if (hasValidationContext(relevantContexts, 'success')) return role('success', 'high', 'Used in explicit success/valid/confirmation context.');
+  if (hasValidationContext(relevantContexts, 'warning')) return role('warning', 'high', 'Used in explicit warning context.');
+  if (hasValidationContext(relevantContexts, 'info')) return role('info', 'medium', 'Used in explicit informational context.');
+
+  if (variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) && isActionColor(relevantContexts)) {
+    return role('primary', 'high', 'Brand/primary variable used on visible main action.');
+  }
+  if (variableHints.some(name => /\b(brand)\b/.test(name))) return role('brand', 'medium', 'Color is exposed through a brand CSS variable.');
+
+  if (isActionColor(relevantContexts)) {
+    return role('primary', 'medium', 'Used as background color on visible CTA button or main action.');
+  }
+  if (relevantContexts.some(context => context.componentType === 'brand_asset')) return role('brand', 'medium', 'Used in visible logo or brand asset context.');
+  if (relevantContexts.some(context => context.property === 'outlineColor')) return role('focus', 'medium', 'Used as outline/focus color.');
+  if (relevantContexts.some(context => context.property.toLowerCase().includes('border'))) return role('border', saturation < 0.25 ? 'medium' : 'low', 'Used primarily as border color.');
+
+  if (luminance > 0.92 && count > 8) return role('surface', 'medium', 'Frequent light color used on visible elements.');
+  if (luminance < 0.12 && count > 8) return role('text', 'medium', 'Frequent dark color used on visible elements.');
+  if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'Role inferred from CSS variable name and visible usage.');
+  if (saturation > 0.35 && count > 1) return role('accent', 'low', 'Saturated visible color without semantic state evidence; kept conservative.');
+  return role('unknown', 'low', 'Insufficient contextual evidence for a semantic role.');
+}
+
+function role(roleName, confidence, reason) {
+  return { role: COLOR_ROLES.has(roleName) ? roleName : 'unknown', confidence, reason };
+}
+
+function hasValidationContext(contexts, type) {
+  return contexts.some(context => context.validationContext === type);
+}
+
+function isActionColor(contexts) {
+  return contexts.some(context => context.appearsInCta && ['backgroundColor', 'color', 'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor'].includes(context.property));
 }
 
 function hexToRgb(hex) {
@@ -1128,6 +1233,865 @@ function describeElement(element) {
   const klass = Array.from(element.classList || []).slice(0, 2).map(item => `.${item}`).join('');
   const label = getAccessibleName(element);
   return `${tag}${id}${klass}${label ? ` — ${label}` : ''}`;
+}
+
+
+// ---- src/page-archetype-classifier.js ----
+const ARCHETYPES = new Set([
+  'landing',
+  'service_landing',
+  'product_detail',
+  'ecommerce_category',
+  'checkout_or_form_flow',
+  'article_or_blog',
+  'dashboard_or_app',
+  'legal_or_support',
+  'unknown'
+]);
+
+const FULL_BEHAVIORAL_ARCHETYPES = new Set(['landing', 'service_landing']);
+
+function pageArchetypeClassifier(input = {}, root = input.root) {
+  const signals = normalizeSignals(input, root);
+  const scored = scoreArchetypes(signals).sort((a, b) => b.score - a.score);
+  const best = scored[0] || { archetype: 'unknown', score: 0, signals: [] };
+  const confidence = confidenceFromScore(best.score, best.signals.length);
+  const archetype = confidence === 'low' && best.score < 3 ? 'unknown' : best.archetype;
+  const outputSignals = archetype === 'unknown'
+    ? best.signals.length ? best.signals : ['No hay señales suficientes para clasificar la página con seguridad.']
+    : best.signals;
+
+  return {
+    archetype: ARCHETYPES.has(archetype) ? archetype : 'unknown',
+    confidence,
+    signals: outputSignals.slice(0, 8),
+    analysisMode: analysisModeFor(archetype, confidence)
+  };
+}
+
+function shouldRunFullBehavioralAnalysis(pageClassification = {}) {
+  return pageClassification.analysisMode === 'full_behavioral';
+}
+
+function normalizeSignals(input, root) {
+  const components = input.detectedComponents || input.components || {};
+  const counts = components.counts || {};
+  const samples = components.samples || {};
+  const headings = normalizeList(input.headings || input.h1 || input.h1Headings || readHeadings(root));
+  const visibleText = compactWhitespace(input.visibleText || readVisibleText(root));
+  const title = compactWhitespace(input.title || '');
+  const url = compactWhitespace(input.url || '');
+  const joinedText = `${url} ${title} ${headings.join(' ')} ${visibleText}`.toLowerCase();
+  const buttonText = normalizeList(samples.buttons || []).map(button => typeof button === 'string' ? button : button.text).join(' ').toLowerCase();
+  const ctaText = normalizeList(samples.ctaGroups || []).flatMap(group => group.actions || []).join(' ').toLowerCase();
+  const forms = numeric(input.numberOfForms, counts.forms);
+  const cards = numeric(counts.cards);
+  const productCards = numeric(input.numberOfProductCards, counts.productCards, countProductCards(root, joinedText, cards));
+  const hasCartCheckoutTerms = Boolean(input.presenceOfCartCheckoutTerms ?? input.hasCartCheckoutTerms ?? matches(joinedText, CART_CHECKOUT_TERMS));
+  const hasArticleDateAuthorTerms = Boolean(input.presenceOfArticleDateAuthorTerms ?? input.hasArticleDateAuthorTerms ?? hasArticleSignals(joinedText, root));
+  const hasFaq = Boolean(input.presenceOfFaq ?? input.hasFaq ?? matches(joinedText, FAQ_TERMS));
+  const hasHero = Boolean(input.presenceOfHero ?? input.hasHero ?? headings.length > 0);
+  const hasCtaGroups = Boolean(input.presenceOfCtaGroups ?? input.hasCtaGroups ?? (numeric(counts.ctaGroups) > 0 || matches(`${buttonText} ${ctaText}`, CTA_TERMS)));
+  const hasCards = Boolean(input.presenceOfCards ?? input.hasCards ?? cards >= 3);
+
+  return {
+    url,
+    title,
+    headings,
+    visibleText,
+    joinedText,
+    buttonText,
+    ctaText,
+    forms,
+    cards,
+    productCards,
+    hasCartCheckoutTerms,
+    hasArticleDateAuthorTerms,
+    hasFaq,
+    hasHero,
+    hasCtaGroups,
+    hasCards,
+    hasHeroCtaStructure: hasHero && hasCtaGroups,
+    hasPricingTerms: matches(joinedText, PRICING_TERMS),
+    hasProductTerms: matches(joinedText, PRODUCT_TERMS),
+    hasCategoryTerms: matches(joinedText, CATEGORY_TERMS),
+    hasServiceTerms: matches(joinedText, SERVICE_TERMS),
+    hasLegalSupportTerms: matches(joinedText, LEGAL_SUPPORT_TERMS),
+    hasDashboardTerms: matches(joinedText, DASHBOARD_TERMS),
+    hasLandingTerms: matches(joinedText, LANDING_TERMS)
+  };
+}
+
+function scoreArchetypes(signals) {
+  return [
+    scoreCheckout(signals),
+    scoreDashboard(signals),
+    scoreArticle(signals),
+    scoreEcommerceCategory(signals),
+    scoreLegalSupport(signals),
+    scoreProductDetail(signals),
+    scoreServiceLanding(signals),
+    scoreLanding(signals),
+    { archetype: 'unknown', score: 0, signals: [] }
+  ];
+}
+
+function scoreLanding(signals) {
+  const result = createScore('landing');
+  add(result, signals.hasHeroCtaStructure, 3, 'Hero con CTA o grupo de acciones visible.');
+  add(result, signals.hasLandingTerms, 2, 'Texto orientado a propuesta de valor, beneficios o conversión.');
+  add(result, signals.hasCards, 1, 'Cards de beneficios/features detectadas.');
+  add(result, signals.hasFaq, 1, 'FAQ u objeciones detectadas.');
+  add(result, signals.forms > 0, 1, 'Formulario de captación detectado.');
+  add(result, !signals.hasCartCheckoutTerms && !signals.hasArticleDateAuthorTerms, 1, 'No predominan señales de checkout ni artículo.');
+  return result;
+}
+
+function scoreServiceLanding(signals) {
+  const result = createScore('service_landing');
+  add(result, signals.hasHeroCtaStructure, 3, 'Hero con CTA o grupo de acciones visible.');
+  add(result, signals.hasServiceTerms, 3, 'Señales de servicio, solución, soporte, demo o contacto.');
+  add(result, signals.hasFaq, 1, 'FAQ u objeciones detectadas.');
+  add(result, signals.forms > 0, 1, 'Formulario de contacto/captación detectado.');
+  add(result, signals.hasCards, 1, 'Cards de beneficios o capacidades detectadas.');
+  return result;
+}
+
+function scoreProductDetail(signals) {
+  const result = createScore('product_detail');
+  add(result, signals.hasProductTerms, 2, 'Señales de producto, SKU, disponibilidad o características.');
+  add(result, signals.hasCartCheckoutTerms, 2, 'Términos de compra, carrito o checkout detectados.');
+  add(result, signals.productCards <= 1 && signals.hasPricingTerms, 1, 'Precio asociado a una vista de producto.');
+  add(result, matches(signals.url, [/\/product\//, /\/p\//, /\/products\//]), 2, 'URL compatible con detalle de producto.');
+  return result;
+}
+
+function scoreEcommerceCategory(signals) {
+  const result = createScore('ecommerce_category');
+  add(result, signals.productCards >= 3, 4, `${signals.productCards} tarjetas/listados de producto detectados.`);
+  add(result, signals.hasCategoryTerms, 3, 'Señales de categoría, catálogo, filtros u ordenación.');
+  add(result, signals.hasCartCheckoutTerms, 1, 'Términos de compra o carrito presentes.');
+  add(result, matches(signals.url, [/\/category\//, /\/collections?\//, /\/shop\b/, /\/tienda\b/]), 2, 'URL compatible con categoría de tienda.');
+  return result;
+}
+
+function scoreCheckout(signals) {
+  const result = createScore('checkout_or_form_flow');
+  add(result, signals.hasCartCheckoutTerms, 4, 'Términos de carrito, pago, checkout o envío detectados.');
+  add(result, signals.forms > 0, 2, `${signals.forms} formulario(s) detectado(s).`);
+  add(result, matches(signals.url, [/checkout/, /cart/, /payment/, /signup/, /register/, /form/]), 2, 'URL compatible con flujo transaccional o formulario.');
+  return result;
+}
+
+function scoreArticle(signals) {
+  const result = createScore('article_or_blog');
+  add(result, signals.hasArticleDateAuthorTerms, 4, 'Señales de autor, fecha, lectura o artículo detectadas.');
+  add(result, matches(signals.url, [/\/blog\//, /\/article\//, /\/news\//, /\/posts?\//]), 2, 'URL compatible con blog/artículo.');
+  add(result, !signals.hasCtaGroups && signals.forms === 0, 1, 'No predominan formularios ni grupos CTA.');
+  return result;
+}
+
+function scoreDashboard(signals) {
+  const result = createScore('dashboard_or_app');
+  add(result, signals.hasDashboardTerms, 4, 'Señales de dashboard, workspace, ajustes o aplicación.');
+  add(result, matches(signals.url, [/\/app\//, /\/dashboard/, /\/admin/, /\/settings/]), 2, 'URL compatible con aplicación autenticada.');
+  add(result, signals.forms > 1 && !signals.hasHeroCtaStructure, 1, 'Múltiples controles sin estructura de landing.');
+  return result;
+}
+
+function scoreLegalSupport(signals) {
+  const result = createScore('legal_or_support');
+  add(result, signals.hasLegalSupportTerms, 4, 'Señales legales, soporte, ayuda o documentación.');
+  add(result, matches(signals.url, [/privacy/, /terms/, /legal/, /support/, /help/, /docs/]), 2, 'URL compatible con legal/soporte.');
+  add(result, !signals.hasHeroCtaStructure, 1, 'No hay estructura clara de conversión.');
+  return result;
+}
+
+function createScore(archetype) {
+  return { archetype, score: 0, signals: [] };
+}
+
+function add(result, condition, score, signal) {
+  if (!condition) return;
+  result.score += score;
+  result.signals.push(signal);
+}
+
+function confidenceFromScore(score, signalCount) {
+  if (score >= 7 && signalCount >= 2) return 'high';
+  if (score >= 4 && signalCount >= 2) return 'medium';
+  return 'low';
+}
+
+function analysisModeFor(archetype, confidence) {
+  if (FULL_BEHAVIORAL_ARCHETYPES.has(archetype) && confidence !== 'low') return 'full_behavioral';
+  if (archetype === 'unknown') return 'snapshot_only';
+  return 'limited_behavioral';
+}
+
+function readHeadings(root) {
+  if (!root?.querySelectorAll) return [];
+  return Array.from(root.querySelectorAll('h1, h2, h3'))
+    .slice(0, 16)
+    .map(element => compactWhitespace(element.textContent || ''))
+    .filter(Boolean);
+}
+
+function readVisibleText(root) {
+  if (!root?.innerText && !root?.textContent) return '';
+  return compactWhitespace(root.innerText || root.textContent || '');
+}
+
+function countProductCards(root, joinedText, fallbackCards) {
+  if (root?.querySelectorAll) {
+    const selector = [
+      '[class*="product"]',
+      '[data-product]',
+      '[itemtype*="Product"]',
+      '[class*="sku"]',
+      '[class*="price"]'
+    ].join(',');
+    const count = Array.from(root.querySelectorAll(selector)).length;
+    if (count) return count;
+  }
+
+  const termHits = (joinedText.match(/\b(add to cart|añadir al carrito|comprar|precio|price|€|\$)\b/gi) || []).length;
+  if (termHits >= 3) return Math.max(fallbackCards, termHits);
+  return 0;
+}
+
+function hasArticleSignals(text, root) {
+  if (matches(text, ARTICLE_TERMS)) return true;
+  if (root?.querySelector) {
+    if (root.querySelector('article, time, [rel="author"], [class*="author"], [class*="date"], [datetime]')) return true;
+  }
+  return /\b\d{1,2}\s+(ene|feb|mar|abr|may|jun|jul|ago|sep|oct|nov|dic|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{4}\b/i.test(text);
+}
+
+function normalizeList(value) {
+  if (Array.isArray(value)) return value;
+  if (!value) return [];
+  return [value];
+}
+
+function numeric(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return 0;
+}
+
+function matches(text, patterns) {
+  return patterns.some(pattern => pattern.test(String(text || '')));
+}
+
+function compactWhitespace(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+const CTA_TERMS = [
+  /\b(get started|start|try|book|demo|contact|buy|subscribe|sign up|learn more)\b/i,
+  /\b(empezar|probar|contratar|comprar|reservar|solicitar|contactar|descargar|suscribirse|ver precios)\b/i
+];
+
+const LANDING_TERMS = [
+  /\b(benefits?|features?|why|pricing|customers?|trusted|testimonials?|plans?)\b/i,
+  /\b(beneficios?|características|por qué|precios|clientes|testimonios|planes|confianza)\b/i
+];
+
+const SERVICE_TERMS = [
+  /\b(service|services|solution|solutions|consulting|support|care|agency|demo|contact sales)\b/i,
+  /\b(servicio|servicios|solución|soluciones|consultoría|soporte|atención|cuidado|demo|contacto)\b/i
+];
+
+const PRODUCT_TERMS = [
+  /\b(product|sku|model|stock|availability|specifications?|reviews?)\b/i,
+  /\b(producto|referencia|modelo|stock|disponibilidad|especificaciones|reseñas|valoraciones)\b/i
+];
+
+const CATEGORY_TERMS = [
+  /\b(category|collection|catalog|filter|sort by|products|shop)\b/i,
+  /\b(categoría|colección|catálogo|filtrar|ordenar|productos|tienda)\b/i
+];
+
+const CART_CHECKOUT_TERMS = [
+  /\b(cart|basket|checkout|payment|shipping|billing|order|add to cart|buy now)\b/i,
+  /\b(carrito|cesta|pago|envío|facturación|pedido|añadir al carrito|comprar ahora)\b/i
+];
+
+const ARTICLE_TERMS = [
+  /\b(article|blog|posted|published|author|by |read time|minutes read|newsletter)\b/i,
+  /\b(artículo|blog|publicado|autor|por |lectura|minutos|newsletter)\b/i
+];
+
+const FAQ_TERMS = [
+  /\b(faq|frequently asked questions|questions|answers)\b/i,
+  /\b(preguntas frecuentes|faq|dudas|respuestas)\b/i
+];
+
+const LEGAL_SUPPORT_TERMS = [
+  /\b(privacy|terms|cookies|legal|support|help center|documentation|docs|refund)\b/i,
+  /\b(privacidad|términos|cookies|legal|soporte|ayuda|documentación|reembolso)\b/i
+];
+
+const DASHBOARD_TERMS = [
+  /\b(dashboard|workspace|admin|settings|analytics|reports|projects|tasks|inbox|profile)\b/i,
+  /\b(panel|escritorio|administración|ajustes|analítica|informes|proyectos|tareas|bandeja|perfil)\b/i
+];
+
+const PRICING_TERMS = [
+  /\b(price|pricing|from \$|from €|\$\d|€\d)\b/i,
+  /\b(precio|precios|desde \$|desde €|\d+\s?€)\b/i
+];
+
+
+// ---- src/dom-regions.js ----
+
+const REGION_TYPES = [
+  'header',
+  'nav',
+  'hero',
+  'main',
+  'section',
+  'aside',
+  'footer',
+  'hidden_or_system',
+  'unknown'
+];
+
+const BEHAVIORAL_REGIONS = new Set(['hero', 'main', 'section']);
+const EXCLUDED_REASONS = {
+  header: 'global header excluded from behavioral scoring',
+  nav: 'global navigation excluded from behavioral scoring',
+  footer: 'footer/contentinfo excluded from behavioral scoring',
+  aside: 'aside/complementary content excluded from behavioral scoring',
+  hidden_or_system: 'hidden, skip, modal, cookie or system content excluded by default',
+  unknown: 'unknown region excluded until manually reviewed'
+};
+
+function detectDomRegions(root = document.body) {
+  const elements = getElements(root);
+  const elementRegions = new Map();
+  const regionCounts = Object.fromEntries(REGION_TYPES.map(region => [region, 0]));
+  const usedRegions = new Set();
+  const excluded = new Map();
+  const behavioralElements = [];
+
+  for (const element of elements) {
+    const region = classifyElementRegion(element);
+    elementRegions.set(element, region);
+    regionCounts[region] += 1;
+
+    if (BEHAVIORAL_REGIONS.has(region)) {
+      usedRegions.add(region);
+      behavioralElements.push(element);
+    } else {
+      const reason = EXCLUDED_REASONS[region] || EXCLUDED_REASONS.unknown;
+      if (!excluded.has(region)) excluded.set(region, reason);
+    }
+  }
+
+  const behavioralRoot = createBehavioralScopeRoot(root, behavioralElements, elementRegions);
+
+  return {
+    regions: regionCounts,
+    usedForBehavioral: Array.from(usedRegions),
+    excludedFromBehavioral: Array.from(excluded, ([region, reason]) => ({ region, reason })),
+    behavioralRoot,
+    elementRegions
+  };
+}
+
+function classifyElementRegion(element) {
+  if (!element || !element.tagName) return 'unknown';
+  if (isHiddenOrSystem(element)) return 'hidden_or_system';
+
+  const semantic = semanticRegion(element);
+  if (semantic) return semantic;
+
+  const ancestry = elementAncestry(element);
+  const classAndId = ancestry.map(item => `${item.id || ''} ${Array.from(item.classList || []).join(' ')}`).join(' ').toLowerCase();
+
+  if (/\b(skip|sr-only|visually-hidden|cookie|cookies|modal|dialog|toast|notification|consent)\b/.test(classAndId)) {
+    if (!isBlockingOverlay(element)) return 'hidden_or_system';
+  }
+  if (/\b(hero|masthead|jumbotron)\b/.test(classAndId)) return 'hero';
+  if (/\b(header|site-header|topbar)\b/.test(classAndId)) return 'header';
+  if (/\b(nav|menu|navbar|navigation)\b/.test(classAndId)) return 'nav';
+  if (/\b(footer|site-footer)\b/.test(classAndId)) return 'footer';
+  if (/\b(aside|sidebar)\b/.test(classAndId)) return 'aside';
+  if (/\b(main|content|page-content)\b/.test(classAndId)) return 'main';
+
+  if (hasAncestor(element, ancestor => semanticRegion(ancestor) === 'main')) {
+    if (element.tagName.toLowerCase() === 'section' || hasSectionLikeClass(element)) return 'section';
+    return 'main';
+  }
+
+  if (element.tagName.toLowerCase() === 'section') return 'section';
+  return 'unknown';
+}
+
+function isBehavioralRegion(region) {
+  return BEHAVIORAL_REGIONS.has(region);
+}
+
+function createBehavioralScopeRoot(root, behavioralElements, elementRegions) {
+  const allowed = new Set(behavioralElements);
+
+  return {
+    __contexticBehavioralScope: true,
+    __contexticText: buildScopedText(behavioralElements),
+    __contexticRegionFor(element) {
+      return elementRegions.get(element) || classifyElementRegion(element);
+    },
+    querySelectorAll(selector) {
+      return getElements(root, selector).filter(element => allowed.has(element));
+    }
+  };
+}
+
+function buildScopedText(elements) {
+  const textElements = elements
+    .filter(element => !hasBehavioralDescendant(element, elements))
+    .map(element => compactText(element.textContent || '', 240))
+    .filter(Boolean);
+
+  return compactText(textElements.join(' '), 12000);
+}
+
+function hasBehavioralDescendant(element, elements) {
+  return elements.some(other => other !== element && element.contains?.(other));
+}
+
+function semanticRegion(element) {
+  const tag = element.tagName.toLowerCase();
+  const role = String(element.getAttribute?.('role') || '').toLowerCase();
+
+  if (tag === 'header') return 'header';
+  if (tag === 'nav' || role === 'navigation') return 'nav';
+  if (tag === 'main' || role === 'main') return 'main';
+  if (tag === 'footer' || role === 'contentinfo') return 'footer';
+  if (tag === 'aside' || role === 'complementary') return 'aside';
+  if (tag === 'section' && hasAncestor(element, ancestor => semanticRegion(ancestor) === 'main')) return 'section';
+  return '';
+}
+
+function isHiddenOrSystem(element) {
+  const tag = element.tagName.toLowerCase();
+  if (['script', 'style', 'noscript', 'template'].includes(tag)) return true;
+  if (!isVisibleElement(element)) return true;
+  if (element.matches?.('[hidden], [aria-hidden="true"]')) return true;
+
+  const ownClassAndId = `${element.id || ''} ${Array.from(element.classList || []).join(' ')}`.toLowerCase();
+  if (/\b(skip|sr-only|visually-hidden)\b/.test(ownClassAndId)) return true;
+  if (/\b(cookie|cookies|consent)\b/.test(ownClassAndId) && !isBlockingOverlay(element)) return true;
+  if (/\b(modal|dialog|toast|notification)\b/.test(ownClassAndId) && !isBlockingOverlay(element)) return true;
+  return false;
+}
+
+function isBlockingOverlay(element) {
+  const rect = element.getBoundingClientRect?.();
+  if (!rect) return false;
+  const viewportWidth = window.innerWidth || 1200;
+  const viewportHeight = window.innerHeight || 900;
+  return rect.width >= viewportWidth * 0.75 && rect.height >= viewportHeight * 0.5;
+}
+
+function hasAncestor(element, predicate) {
+  let current = element.parentElement;
+  while (current) {
+    if (predicate(current)) return true;
+    current = current.parentElement;
+  }
+  return false;
+}
+
+function elementAncestry(element) {
+  const items = [];
+  let current = element;
+  while (current) {
+    items.push(current);
+    current = current.parentElement;
+  }
+  return items;
+}
+
+function hasSectionLikeClass(element) {
+  const classAndId = `${element.id || ''} ${Array.from(element.classList || []).join(' ')}`.toLowerCase();
+  return /\b(section|block|panel|module)\b/.test(classAndId);
+}
+
+function getElements(root, selector = '*') {
+  if (!root?.querySelectorAll) return [];
+  return Array.from(root.querySelectorAll(selector));
+}
+
+
+// ---- src/findings-prioritization.js ----
+const FINDING_TYPES = new Set([
+  'conversion_risk',
+  'content_gap',
+  'interaction_risk',
+  'accessibility_risk',
+  'design_system_debt',
+  'semantic_inference_risk',
+  'instrumentation_gap',
+  'manual_review'
+]);
+
+const CRITICAL_BLOCKER_RULES = new Set([
+  'where.no-primary-cta-in-hero'
+]);
+
+function buildFindings(snapshot = {}) {
+  const frictions = snapshot.frictions || [];
+  const behavioralMapping = snapshot.behavioralMapping || [];
+  const findings = [
+    ...frictions.map(frictionToFinding),
+    ...weakBlocksToReviewFindings(behavioralMapping)
+  ];
+
+  if (!findings.length) {
+    findings.push(createFinding({
+      id: 'manual.no-high-confidence-frictions',
+      type: 'manual_review',
+      title: 'No hay fricciones UX de alta confianza',
+      evidence: ['Contextic no detectó fricciones heurísticas relevantes con evidencia fuerte.'],
+      affectedArea: 'screen',
+      severity: 1,
+      confidence: 'medium',
+      impact: 'low',
+      effort: 'low',
+      priority: 'Review',
+      rationale: 'Sin evidencia fuerte no se eleva ninguna recomendación a P0.'
+    }));
+  }
+
+  return findings.sort(compareFindings);
+}
+
+function groupFindings(findings = []) {
+  return {
+    ux: findings.filter(finding => ['conversion_risk', 'content_gap', 'interaction_risk', 'semantic_inference_risk', 'instrumentation_gap'].includes(finding.type)),
+    designSystem: findings.filter(finding => finding.type === 'design_system_debt'),
+    accessibility: findings.filter(finding => finding.type === 'accessibility_risk'),
+    manualReview: findings.filter(finding => finding.type === 'manual_review')
+  };
+}
+
+function frictionToFinding(friction = {}) {
+  const type = inferFindingType(friction);
+  const severity = normalizeSeverity(friction.severityScore ?? friction.severity);
+  const confidence = normalizeConfidence(friction.confidence);
+  const impact = normalizeImpact(friction.expectedImpact);
+  const effort = normalizeEffort(friction.implementationEffort);
+
+  return createFinding({
+    id: friction.id || friction.ruleId || slugify(friction.title),
+    type,
+    title: friction.title || 'Hallazgo UX',
+    evidence: normalizeEvidence(friction),
+    affectedArea: friction.block || friction.affectedArea || 'screen',
+    severity,
+    confidence,
+    impact,
+    effort,
+    priority: assignPriority({ friction, type, severity, confidence, impact }),
+    rationale: buildRationale({ friction, type, severity, confidence, impact })
+  });
+}
+
+function weakBlocksToReviewFindings(behavioralMapping = []) {
+  return behavioralMapping
+    .filter(block => block.present !== 'sí' || block.quality <= 2)
+    .map(block => createFinding({
+      id: `review.weak-block.${block.block}`,
+      type: 'manual_review',
+      title: `Weak block: ${block.label || block.block}`,
+      evidence: [
+        ...(block.evidence || []).slice(0, 2),
+        ...(block.missing || []).slice(0, 2)
+      ].filter(Boolean),
+      affectedArea: block.block || 'behavioral_block',
+      severity: block.quality <= 1 ? 2 : 1,
+      confidence: 'low',
+      impact: 'medium',
+      effort: 'medium',
+      priority: 'Review',
+      rationale: 'Bloque behavioral débil sin fricción heurística fuerte; se mantiene como revisión manual, no como bloqueo crítico.'
+    }));
+}
+
+function createFinding(input = {}) {
+  return {
+    id: input.id || '',
+    type: FINDING_TYPES.has(input.type) ? input.type : 'manual_review',
+    title: input.title || 'Finding',
+    evidence: Array.isArray(input.evidence) ? input.evidence : [input.evidence].filter(Boolean),
+    affectedArea: input.affectedArea || 'screen',
+    severity: normalizeSeverity(input.severity),
+    confidence: normalizeConfidence(input.confidence),
+    impact: normalizeImpact(input.impact),
+    effort: normalizeEffort(input.effort),
+    priority: input.priority || 'Review',
+    rationale: input.rationale || 'Prioridad asignada por evidencia, severidad, confianza e impacto.'
+  };
+}
+
+function assignPriority({ friction, type, severity, confidence, impact }) {
+  if (type === 'design_system_debt') return severity >= 4 ? 'DS-P1' : 'DS-P2';
+  if (confidence === 'low') return 'Review';
+
+  if (isCriticalBlocker(friction, type, severity, confidence)) return 'P0';
+  if (type === 'accessibility_risk' && severity >= 5 && confidence !== 'low') return 'P0';
+
+  if (['conversion_risk', 'interaction_risk', 'accessibility_risk'].includes(type) && severity >= 4 && ['medium', 'high'].includes(confidence)) return 'P1';
+  if (type === 'content_gap' && severity >= 4 && confidence === 'high') return 'P1';
+  if (impact === 'high' && severity >= 3) return 'P2';
+  if (severity >= 3) return 'P2';
+  return 'P3';
+}
+
+function isCriticalBlocker(friction, type, severity, confidence) {
+  const id = friction.ruleId || friction.id || '';
+  const text = `${friction.title || ''} ${friction.evidence || ''} ${friction.insight || ''}`.toLowerCase();
+  if (CRITICAL_BLOCKER_RULES.has(id) && severity >= 5 && confidence !== 'low') return true;
+  if (type !== 'conversion_risk' && type !== 'interaction_risk') return false;
+  if (severity < 5 || confidence === 'low') return false;
+  return /cta.*(ausente|roto)|formulario.*(inutilizable|bloqueado)|error funcional|layout roto|navegaci[oó]n bloqueante|contraste cr[ií]tico|no hay cta/i.test(text);
+}
+
+function buildRationale({ friction, type, severity, confidence, impact }) {
+  const evidence = normalizeEvidence(friction)[0] || 'evidencia heurística limitada';
+  if (type === 'design_system_debt') {
+    return `Deuda de sistema de diseño: prioridad DS basada en severidad ${severity}, confianza ${confidence} y evidencia: ${evidence}`;
+  }
+  if (confidence === 'low') {
+    return `Señal ambigua o de baja confianza; requiere revisión manual antes de priorizar. Evidencia: ${evidence}`;
+  }
+  return `Prioridad basada en severidad ${severity}, confianza ${confidence}, impacto ${impact} y evidencia: ${evidence}`;
+}
+
+function inferFindingType(friction) {
+  const id = friction.ruleId || friction.id || '';
+  const title = String(friction.title || '').toLowerCase();
+  const type = friction.type || friction.frictionType || '';
+
+  if (/spacing|radius|color|palette|radio|espaciado|paleta|token/.test(id + title)) return 'design_system_debt';
+  if (/alt|unlabeled|label|disabled|focus|contrast|contraste|accesibilidad/.test(id + title)) return 'accessibility_risk';
+  if (/where\.|cta|form|input|navigation|navegaci[oó]n|acción|accionabilidad/.test(id + title)) return 'interaction_risk';
+  if (/what\.|why\.|ambiguedad|ambigüedad|copy|contenido|propuesta/.test(id + title + type)) return 'content_gap';
+  if (/inference|semantic|heuristic/.test(String(friction.evidenceType || ''))) return 'semantic_inference_risk';
+  return 'conversion_risk';
+}
+
+function normalizeEvidence(friction) {
+  const evidence = [];
+  if (Array.isArray(friction.evidence)) evidence.push(...friction.evidence);
+  else if (friction.evidence) evidence.push(friction.evidence);
+  if (friction.observed?.samples?.length) evidence.push(`Muestras: ${friction.observed.samples.join(', ')}`);
+  if (friction.hypothesis) evidence.push(friction.hypothesis);
+  return evidence.filter(Boolean);
+}
+
+function normalizeSeverity(value = 3) {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(1, Math.min(5, value));
+  const normalized = String(value || '').toLowerCase();
+  return { baja: 2, media: 3, alta: 4, critica: 5, crítica: 5 }[normalized] || 3;
+}
+
+function normalizeConfidence(value = 'medium') {
+  const normalized = String(value || '').toLowerCase();
+  return { baja: 'low', low: 'low', media: 'medium', medium: 'medium', alta: 'high', high: 'high' }[normalized] || 'medium';
+}
+
+function normalizeImpact(value = 'medium') {
+  return ['low', 'medium', 'high'].includes(value) ? value : 'medium';
+}
+
+function normalizeEffort(value = 'medium') {
+  return ['low', 'medium', 'high'].includes(value) ? value : 'medium';
+}
+
+function compareFindings(a, b) {
+  const priorityOrder = { P0: 0, P1: 1, 'DS-P1': 2, P2: 3, 'DS-P2': 4, P3: 5, Review: 6 };
+  return (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9) || b.severity - a.severity;
+}
+
+function slugify(value = 'finding') {
+  return String(value || 'finding').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+
+// ---- src/hypotheses.js ----
+function generateHypotheses(findings = [], pageClassification = {}) {
+  const rankedFindings = findings
+    .filter(shouldCreateHypothesis)
+    .sort(compareFindingsForHypotheses);
+  const hypotheses = rankedFindings.slice(0, 5).map((finding, index) => findingToHypothesis(finding, pageClassification, index + 1));
+
+  if (hypotheses.length) return hypotheses;
+
+  return [baselineHypothesis(pageClassification)];
+}
+
+function shouldCreateHypothesis(finding) {
+  if (!finding) return false;
+  if (finding.type === 'design_system_debt') return true;
+  return finding.priority !== 'Review' || finding.type === 'manual_review';
+}
+
+function findingToHypothesis(finding, pageClassification, number) {
+  const isManual = finding.priority === 'Review' || finding.confidence === 'low';
+  const isDesignSystem = finding.type === 'design_system_debt';
+  const metrics = metricsForFinding(finding, pageClassification);
+
+  return {
+    id: `H${number}`,
+    title: hypothesisTitle(finding, isDesignSystem),
+    because: becauseText(finding),
+    weBelieve: beliefText(finding, isDesignSystem),
+    ifWe: interventionText(finding, isDesignSystem, isManual),
+    then: outcomeText(finding, isDesignSystem),
+    metrics,
+    segments: segmentsFor(pageClassification),
+    confidence: finding.confidence || 'low',
+    effort: finding.effort || 'medium',
+    experimentType: experimentTypeFor(finding, isDesignSystem, isManual)
+  };
+}
+
+function baselineHypothesis(pageClassification) {
+  const archetype = pageClassification.archetype || 'unknown';
+  return {
+    id: 'H1',
+    title: 'Baseline manual review',
+    because: 'No hay findings de alta confianza; la salida automática no debe inventar una recomendación de conversión.',
+    weBelieve: `La página ${archetype} necesita una revisión de baseline antes de cambiar la experiencia.`,
+    ifWe: 'Usamos el snapshot actual como baseline y validamos manualmente CTA, jerarquía, accesibilidad y eventos de analítica.',
+    then: 'Podremos decidir qué hipótesis merece diseño, QA o experimento sin elevar señales débiles a prioridad crítica.',
+    metrics: {
+      primary: 'baseline completion rate or primary task success',
+      secondary: ['primary CTA CTR', 'secondary action clicks', 'bounce rate'],
+      guardrail: ['no accessibility regressions', 'no increase in rage/dead clicks']
+    },
+    segments: segmentsFor(pageClassification),
+    confidence: 'low',
+    effort: 'low',
+    experimentType: 'design review'
+  };
+}
+
+function hypothesisTitle(finding, isDesignSystem) {
+  if (isDesignSystem) return `System hypothesis: ${finding.title}`;
+  if (finding.affectedArea === 'where' || /cta/i.test(finding.title)) return `Clarify the primary CTA: ${finding.title}`;
+  return `Test: ${finding.title}`;
+}
+
+function becauseText(finding) {
+  return finding.evidence?.length
+    ? finding.evidence.slice(0, 2).join('; ')
+    : finding.rationale || 'Contextic detected a review signal without strong evidence.';
+}
+
+function beliefText(finding, isDesignSystem) {
+  if (isDesignSystem) {
+    return 'A clearer component/token decision will improve implementation consistency and reduce future UI drift.';
+  }
+  if (finding.affectedArea === 'where') {
+    return 'Users may hesitate or split attention when the primary action does not clearly match the page objective.';
+  }
+  if (finding.type === 'accessibility_risk') {
+    return 'Fixing the accessibility risk will improve task completion without reducing comprehension or conversion.';
+  }
+  return 'Resolving this finding should improve user comprehension, confidence, or task progression.';
+}
+
+function interventionText(finding, isDesignSystem, isManual) {
+  if (isDesignSystem) {
+    return 'Define or consolidate the affected token/component rule, document it, and verify affected components against the rule.';
+  }
+  if (isManual && finding.affectedArea === 'where') {
+    return 'Review the clarity of the primary CTA, validate whether it answers the page objective, and compare it against secondary actions.';
+  }
+  if (finding.affectedArea === 'where') {
+    return 'Make the primary CTA copy, hierarchy, and placement match the main page objective while keeping secondary actions visibly secondary.';
+  }
+  if (finding.type === 'accessibility_risk') {
+    return 'Fix the accessibility issue and run keyboard/screen-reader and regression checks on the affected component.';
+  }
+  return 'Create a focused variant or review pass that addresses only this finding and preserves the current design baseline.';
+}
+
+function outcomeText(finding, isDesignSystem) {
+  if (isDesignSystem) {
+    return 'Implementation effort and UI inconsistency should decrease without changing product or content claims.';
+  }
+  if (finding.affectedArea === 'where') {
+    return 'Primary CTA engagement should improve while secondary clicks and bounce do not worsen.';
+  }
+  return 'The affected user task should become clearer or safer without harming guardrail metrics.';
+}
+
+function metricsForFinding(finding, pageClassification) {
+  if (finding.type === 'design_system_debt') {
+    return {
+      primary: 'component/token reuse rate',
+      secondary: ['number of one-off styles', 'implementation time for affected component'],
+      guardrail: ['no visual regressions in affected states', 'no accessibility regressions']
+    };
+  }
+
+  if (finding.affectedArea === 'where' || /cta/i.test(finding.title)) {
+    return {
+      primary: 'primary CTA CTR',
+      secondary: ['secondary action clicks', 'conversion rate', 'bounce rate'],
+      guardrail: ['no increase in form abandonment', 'no accessibility regressions']
+    };
+  }
+
+  if (finding.type === 'accessibility_risk') {
+    return {
+      primary: 'task completion rate for affected interaction',
+      secondary: ['keyboard completion rate', 'form completion rate', 'error recovery rate'],
+      guardrail: ['no contrast regressions', 'no focus order regressions']
+    };
+  }
+
+  return {
+    primary: primaryMetricForPage(pageClassification),
+    secondary: ['primary CTA CTR', 'scroll depth to affected block', 'bounce rate'],
+    guardrail: ['no accessibility regressions', 'no increase in support/error events']
+  };
+}
+
+function primaryMetricForPage(pageClassification) {
+  if (['landing', 'service_landing'].includes(pageClassification.archetype)) return 'qualified conversion rate';
+  if (pageClassification.archetype === 'article_or_blog') return 'engaged reading completion';
+  if (pageClassification.archetype === 'ecommerce_category') return 'product detail click-through rate';
+  return 'primary task completion rate';
+}
+
+function experimentTypeFor(finding, isDesignSystem, isManual) {
+  if (isDesignSystem) return 'QA audit';
+  if (isManual) return finding.confidence === 'low' ? 'design review' : 'analytics review';
+  if (finding.type === 'accessibility_risk') return 'QA audit';
+  if (finding.confidence === 'high' && ['conversion_risk', 'interaction_risk', 'content_gap'].includes(finding.type)) return 'A/B test';
+  if (finding.confidence === 'medium') return 'usability test';
+  return 'analytics review';
+}
+
+function segmentsFor(pageClassification) {
+  const archetype = pageClassification.archetype || 'unknown';
+  if (['landing', 'service_landing'].includes(archetype)) return ['new visitors', 'returning visitors', 'mobile users'];
+  if (archetype === 'ecommerce_category') return ['category browsers', 'mobile users'];
+  return ['all users', 'mobile users'];
+}
+
+function compareFindingsForHypotheses(a, b) {
+  const priorityOrder = { P0: 0, P1: 1, 'DS-P1': 2, P2: 3, 'DS-P2': 4, P3: 5, Review: 6 };
+  return (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9) || b.severity - a.severity;
 }
 
 
@@ -1502,6 +2466,8 @@ function getBlockRisks(block) {
 }
 
 function getVisiblePageText(root) {
+  if (root?.__contexticBehavioralScope) return root.__contexticText || '';
+
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement;
@@ -1656,6 +2622,7 @@ function toHypothesis(signal = '') {
 
 
 // ---- src/contextic-report.js ----
+
 const TOOL_NAME = 'Contextic';
 const LANGUAGE = 'es';
 
@@ -1664,9 +2631,22 @@ function buildContexticReport(snapshot = {}) {
   const typography = snapshot.typography || {};
   const spacing = snapshot.spacing || {};
   const components = snapshot.components || {};
+  const scopeMap = snapshot.scopeMap || {
+    regions: {},
+    usedForBehavioral: [],
+    excludedFromBehavioral: []
+  };
+  const pageClassification = snapshot.pageClassification || {
+    archetype: 'unknown',
+    confidence: 'low',
+    signals: ['No hay clasificación de arquetipo disponible en el snapshot.'],
+    analysisMode: 'snapshot_only'
+  };
   const behavioralMapping = snapshot.behavioralMapping || [];
   const frictions = snapshot.frictions || [];
   const behavioralRecommendation = snapshot.behavioralRecommendation || {};
+  const findings = snapshot.findings || buildFindings(snapshot);
+  const hypotheses = snapshot.hypotheses || generateHypotheses(findings, pageClassification);
 
   return {
     meta: {
@@ -1683,6 +2663,8 @@ function buildContexticReport(snapshot = {}) {
       primaryConversionAction: getPrimaryActionLabel(components),
       mainConversionRisk: getMainConversionRisk(frictions, behavioralMapping)
     },
+    pageClassification,
+    scopeMap,
     detectedTokens: {
       colors: colors.colors || [],
       cssVariables: colors.cssVariables || [],
@@ -1693,6 +2675,8 @@ function buildContexticReport(snapshot = {}) {
       borders: spacing.borders || []
     },
     detectedComponents: buildDetectedComponents(components),
+    findings,
+    hypotheses,
     behavioralMapping: normalizeBehavioralMapping(behavioralMapping),
     uxFrictions: frictions.map(normalizeFrictionForReport),
     implementationRules: buildImplementationRules(behavioralRecommendation),
@@ -1860,22 +2844,55 @@ function buildDesignContextMarkdown(snapshot) {
   const typography = snapshot.typography || {};
   const spacing = snapshot.spacing || {};
   const components = snapshot.components || {};
-  const frictions = snapshot.frictions || [];
   const behavioralMapping = snapshot.behavioralMapping || [];
   const report = buildContexticReport(snapshot);
+  const pageClassification = report.pageClassification || {};
+  const scopeMap = report.scopeMap || {};
+  const findings = report.findings || [];
+  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification);
+  const findingGroups = groupFindings(findings);
+  const lowConfidenceFindings = findings.filter(finding => finding.confidence === 'low' || finding.priority === 'Review');
+  const fullBehavioral = pageClassification.analysisMode === 'full_behavioral';
 
   return `# design-context.md — Contextic
 
-Capturado desde: ${report.meta.sourceUrl}
-Título: ${report.screenSummary.pageTitle || 'Sin título'}
-Generado en: ${report.meta.generatedAt}
-Viewport: ${meta.viewport?.width || 'unknown'}x${meta.viewport?.height || 'unknown'}
+## Capture metadata
 
-## Design System Snapshot
+- Source URL: ${report.meta.sourceUrl}
+- Page title: ${report.screenSummary.pageTitle || 'Sin título'}
+- Generated at: ${report.meta.generatedAt}
+- Viewport: ${meta.viewport?.width || 'unknown'}x${meta.viewport?.height || 'unknown'}
+- Evidence policy: Observed evidence comes from visible DOM/CSS and scoped regions. Inferences below are marked with confidence and should be validated before implementation.
+
+## Page classification
+
+- Archetype: ${pageClassification.archetype || 'unknown'}
+- Confidence: ${pageClassification.confidence || 'low'}
+- Analysis mode: ${pageClassification.analysisMode || 'snapshot_only'}
+- Behavioral scope: ${behavioralScopeNote(pageClassification)}
+- Signals: ${(pageClassification.signals || []).join('; ') || 'No hay señales suficientes.'}
+- Inference note: ${confidenceNote(pageClassification.confidence, 'Page classification is heuristic and should not be treated as ground truth.')}
+
+## Scope map
+
+### Regions detected
+${buildScopeRegionList(scopeMap.regions)}
+
+### Used for behavioral
+${buildBehavioralScopeList(scopeMap.usedForBehavioral)}
+
+### Excluded from behavioral
+${buildScopeExclusionList(scopeMap.excludedFromBehavioral)}
+
+## Executive summary
+
+${buildExecutiveSummary({ findings, findingGroups, hypotheses, behavioralMapping, pageClassification })}
+
+## Design system snapshot
 
 ### Colors detected by frequency
-| Color | Count | Inferred role | Confidence | Observed use |
-|---|---:|---|---|---|
+| Color | Count | Inferred role | Confidence | Observed use | Role reason |
+|---|---:|---|---|---|---|
 ${buildColorRows(colors)}
 
 ### Typography detected
@@ -1891,7 +2908,7 @@ ${buildDesignSystemTokenRows(spacing)}
 ### CSS variables detected
 ${buildCssVariableList(colors.cssVariables || [])}
 
-## Component Inventory
+## Component inventory
 
 | Component candidate | Instances | Variants inferred | Recommended states | Accessibility risk | Design system recommendation |
 |---|---:|---|---|---|---|
@@ -1900,51 +2917,56 @@ ${buildComponentInventoryRows(components)}
 ### UI patterns observed
 ${buildPatternList(components, behavioralMapping)}
 
-## UX Friction Notes
+## Behavioral assessment
 
-${frictions.length ? frictions.map((friction, index) => formatFriction(friction, index + 1)).join('\n\n') : '- No se detectan fricciones UX heurísticas relevantes. Revisa manualmente antes de tomar decisiones de producto.'}
+${buildBehavioralAssessment({ fullBehavioral, behavioralMapping, pageClassification })}
 
-### Behavioral block map
-| Block | Present | Quality | Evidence | Friction note | Severity |
-|---|---|---:|---|---|---:|
-${behavioralMapping.map(formatBehavioralMapRow).join('\n')}
+## UX findings
+
+${fullBehavioral
+  ? buildFindingList(findingGroups.ux.filter(finding => finding.confidence !== 'low' && finding.priority !== 'Review'))
+  : '- Análisis behavioral limitado o desactivado por clasificación de página. No se generan recomendaciones de conversión con la matriz actual para este arquetipo.'}
+
+## Design system findings
+
+${buildFindingList(findingGroups.designSystem)}
+
+## Accessibility findings
+
+${buildFindingList(findingGroups.accessibility)}
+
+## Low-confidence findings
+
+${buildFindingList(lowConfidenceFindings)}
+
+## Hypotheses and experiments
+
+${buildHypothesisCards(hypotheses)}
 
 ## Implementation guidance
 
-${buildImplementationGuidance(snapshot).map(item => `- ${item}`).join('\n')}
-
-## Prioritized follow-up
-
-| Prioridad | Cambio | Fricción resuelta | Impacto esperado | Esfuerzo | Dependencias |
-|---:|---|---|---|---|---|
-${buildPrioritizationRows(frictions, behavioralMapping)}
+${buildImplementationGuidance(snapshot).filter(item => fullBehavioral || !isConversionGuidance(item)).map(item => `- ${item}`).join('\n')}
 
 ## Recommended metrics
 
-- CTR del CTA principal.
-- Scroll depth por bloque behavioral.
-- Ratio de interacción con prueba social.
-- Inicio de formulario.
-- Finalización de formulario.
-- Clicks en CTA secundarios.
-- Tiempo hasta primer CTA click.
-- Drop-off por sección.
-- Ratio de usuarios que llegan a bloques de objeción.
-- Conversión final.
+${buildRecommendedMetrics(hypotheses)}
 
 ## Handoff summary
 
-### Lo que funciona
+### What works
 ${buildWhatWorks(behavioralMapping)}
 
-### Lo que bloquea la conversión
-${buildWhatBlocks(frictions, behavioralMapping)}
+### High-confidence risks
+${buildHighConfidenceRisks(findings)}
 
-### Cambios mínimos de mayor impacto
-${buildMinimumChanges(frictions, behavioralMapping)}
+### Manual review items
+${buildManualReviewSummary(findings, behavioralMapping)}
 
-### Siguiente experimento recomendado
-${buildNextExperiment(frictions, behavioralMapping)}
+### Design system debt
+${buildDesignSystemDebtSummary(findingGroups.designSystem)}
+
+### Top hypothesis
+${buildNextExperiment(hypotheses, behavioralMapping)}
 `;
 }
 
@@ -1955,28 +2977,52 @@ function buildJsonExport(snapshot) {
 function buildGithubIssueExport(input = {}) {
   const snapshot = looksLikeReport(input) ? {} : input;
   const report = looksLikeReport(input) ? input : buildContexticReport(snapshot);
-  const evidence = buildGithubEvidence(snapshot, report);
-  const problem = buildGithubProblem(snapshot, report, evidence);
-  const suggestedFix = buildGithubSuggestedFix(snapshot, report, evidence);
-  const acceptanceCriteria = buildGithubAcceptanceCriteria(snapshot, report, evidence);
-  const implementationNotes = buildImplementationGuidance(snapshot).slice(0, 8);
+  const pageClassification = report.pageClassification || {};
+  const scopeMap = report.scopeMap || {};
+  const findings = report.findings || [];
+  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification);
+  const groups = groupFindings(findings);
+  const weakBlocks = Object.values(report.behavioralMapping || {}).filter(block => block.present !== 'sí' || block.quality <= 2);
+  const title = `[Contextic] Review ${pageClassification.archetype || 'unknown'} findings for ${report.screenSummary?.pageTitle || 'untitled page'}`;
 
-  return `# UI/UX debt detected on current page
+  return `# ${title}
 
-## Problem
-${problem}
+## Context
+- URL: ${report.meta?.sourceUrl || 'unknown'}
+- Viewport: ${formatViewport(snapshot.meta?.viewport)}
+- Page archetype: ${pageClassification.archetype || 'unknown'} (${pageClassification.confidence || 'low'} confidence)
+- Analysis mode: ${pageClassification.analysisMode || 'snapshot_only'}
+- Generated at: ${report.meta?.generatedAt || 'unknown'}
+${pageClassification.analysisMode === 'snapshot_only' ? '- Note: analysis mode is snapshot_only; no conversion recommendations are generated by the current behavioral model.' : ''}
 
-## Evidence
-${evidence.length ? evidence.map(item => `- ${item}`).join('\n') : '- No strong automated evidence was detected. Treat this issue as a conservative manual UI review task.'}
+## Summary
+- UX frictions: ${groups.ux.length}
+- Weak blocks: ${weakBlocks.length}${weakBlocks.length ? ` (${weakBlocks.map(block => block.label || block.block).join(', ')})` : ''}
+- DS risks: ${groups.designSystem.length}
+- Manual review items: ${groups.manualReview.length + findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review').length}
 
-## Suggested fix
-${suggestedFix}
+## Top findings
+${buildGithubTopFindings(findings)}
+
+## Hypotheses
+${buildGithubHypotheses(hypotheses)}
+
+## Implementation notes
+- Components affected: ${githubComponentsAffected(report.detectedComponents || [])}
+- Tokens affected: ${githubTokensAffected(report.detectedTokens || {}, findings)}
+- Accessibility checks: ${githubAccessibilityChecks(report.detectedComponents || [], groups.accessibility)}
+- Behavioral scope: used ${formatList(scopeMap.usedForBehavioral)}; excluded ${formatList((scopeMap.excludedFromBehavioral || []).map(item => item.region))}
 
 ## Acceptance criteria
-${acceptanceCriteria.map(item => `- [ ] ${item}`).join('\n')}
+- [ ] Findings reviewed
+- [ ] CTA hierarchy validated
+- [ ] Color roles validated
+- [ ] Behavioral scope reviewed
+- [ ] Metrics/instrumentation confirmed
 
-## Notes for implementation
-${implementationNotes.map(item => `- ${item}`).join('\n')}
+## Raw exports
+- design-context.md available from Contextic
+- JSON available from Contextic
 `;
 }
 
@@ -2029,10 +3075,12 @@ function buildTokensSnapshot(snapshot) {
 function buildColorRows(colors = {}) {
   const rows = (colors.colors || []).slice(0, 12).map(color => {
     const observedUse = color.sample ? `${color.sample.property} on ${color.sample.selector}` : 'unknown';
-    return `| ${color.value} | ${color.count} | ${color.suggestedRole || 'unknown'} | ${color.roleConfidence || roleConfidenceFromName(color.suggestedRole)} | ${escapePipes(observedUse)} |`;
+    const confidence = color.roleConfidence || roleConfidenceFromName(color.suggestedRole);
+    const reason = color.roleReason || (confidence === 'low' || confidence === 'unknown' ? 'Low confidence: insufficient contextual evidence.' : 'Role inferred from color usage.');
+    return `| ${color.value} | ${color.count} | ${color.suggestedRole || 'unknown'} | ${confidence} | ${escapePipes(observedUse)} | ${escapePipes(reason)} |`;
   });
 
-  return rows.join('\n') || '| unknown | 0 | unknown | unknown | No color evidence detected |';
+  return rows.join('\n') || '| unknown | 0 | unknown | unknown | No color evidence detected | Low confidence: no usage context. |';
 }
 
 function buildTypographyRows(typography = {}) {
@@ -2127,6 +3175,192 @@ function buildImplementationGuidance(snapshot = {}) {
   }
 
   return guidance;
+}
+
+function behavioralScopeNote(pageClassification = {}) {
+  if (pageClassification.analysisMode === 'full_behavioral') {
+    return 'La matriz behavioral completa se aplica porque la página parece una landing o service landing con confianza suficiente.';
+  }
+  if (pageClassification.analysisMode === 'limited_behavioral') {
+    return 'La matriz behavioral de conversión queda desactivada; se entrega snapshot, inventario, riesgos de accesibilidad y notas de revisión manual.';
+  }
+  return 'Sin señales suficientes para aplicar análisis behavioral; se entrega snapshot técnico y revisión manual.';
+}
+
+function buildScopeRegionList(regions = {}) {
+  const rows = Object.entries(regions)
+    .filter(([, countValue]) => count(countValue) > 0)
+    .map(([region, countValue]) => `- ${region}: ${countValue}`);
+
+  return rows.join('\n') || '- No hay mapa de regiones disponible.';
+}
+
+function buildBehavioralScopeList(regions = []) {
+  if (!regions.length) return '- Ninguna región quedó habilitada para scoring behavioral.';
+  return regions.map(region => `- ${region}`).join('\n');
+}
+
+function buildScopeExclusionList(exclusions = []) {
+  if (!exclusions.length) return '- No se excluyeron regiones por heurística.';
+  return exclusions.map(item => `- ${item.region}: ${item.reason}`).join('\n');
+}
+
+function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses = [], behavioralMapping = [], pageClassification = {} }) {
+  const highConfidenceRisks = findings.filter(finding => finding.confidence === 'high' && ['P0', 'P1'].includes(finding.priority));
+  const weakBlocks = getWeakBlocks(behavioralMapping);
+  const topHypothesis = hypotheses[0];
+  const lines = [
+    `- Observed: ${findings.length} finding(s), ${findingGroups.designSystem?.length || 0} design-system debt item(s), ${findingGroups.accessibility?.length || 0} accessibility finding(s).`,
+    `- Inferred: page archetype is ${pageClassification.archetype || 'unknown'} with ${pageClassification.confidence || 'low'} confidence.`,
+    highConfidenceRisks.length
+      ? `- High-confidence risks: ${highConfidenceRisks.map(finding => finding.title).slice(0, 3).join('; ')}.`
+      : '- No se detectan fricciones UX de alta confianza.',
+    weakBlocks.length
+      ? `- Weak blocks for manual review: ${weakBlocks.map(block => block.label).join(', ')}.`
+      : '- No weak behavioral blocks detected by current heuristics.',
+    topHypothesis
+      ? `- Top hypothesis: ${topHypothesis.id} ${topHypothesis.title}; primary metric: ${topHypothesis.metrics.primary}.`
+      : '- No measurable hypothesis generated.'
+  ];
+
+  return lines.join('\n');
+}
+
+function buildBehavioralAssessment({ fullBehavioral, behavioralMapping = [], pageClassification = {} }) {
+  if (!fullBehavioral) {
+    return `- Behavioral analysis mode: ${pageClassification.analysisMode || 'snapshot_only'}.
+- No conversion recommendations are generated for this archetype with the current behavioral model.
+- Treat any behavioral notes as manual review, not optimization instruction.`;
+  }
+
+  return `### Behavioral block map
+| Block | Present | Quality | Evidence type | Evidence | Manual review note | Severity |
+|---|---|---:|---|---|---|---:|
+${behavioralMapping.map(formatBehavioralAssessmentRow).join('\n')}
+
+### Weak blocks
+${buildWeakBlockList(behavioralMapping)}`;
+}
+
+function buildWeakBlockList(behavioralMapping = []) {
+  const weak = getWeakBlocks(behavioralMapping).map(block => `- ${block.label}: ${block.missing?.[0] || block.detectedFriction || 'Needs manual validation.'}`);
+  return weak.join('\n') || '- No weak blocks detected.';
+}
+
+function getWeakBlocks(behavioralMapping = []) {
+  return behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2);
+}
+
+function formatBehavioralAssessmentRow(block) {
+  const evidenceType = block.evidence?.length ? 'observed/inferred from scoped DOM' : 'missing evidence';
+  return `| ${block.label} | ${block.present} | ${block.quality} | ${evidenceType} | ${escapePipes((block.evidence || []).slice(0, 2).join('; ') || 'Sin evidencia suficiente')} | ${escapePipes(block.detectedFriction || block.missing?.[0] || 'Sin fricción clara')} | ${block.severity} |`;
+}
+
+function confidenceNote(confidence = 'low', fallback = '') {
+  if (confidence === 'high') return 'High confidence inference based on multiple observed signals.';
+  if (confidence === 'medium') return `Medium confidence inference; validate before making product decisions. ${fallback}`;
+  return `Low confidence inference; use as manual review input only. ${fallback}`;
+}
+
+function buildFindingList(findings = []) {
+  if (!findings.length) return '- No se detectan hallazgos en esta categoría.';
+  return findings.map(formatFinding).join('\n\n');
+}
+
+function formatFinding(finding) {
+  const uncertainty = finding.confidence === 'high'
+    ? ''
+    : `\n- Uncertainty: ${finding.confidence === 'medium' ? 'Medium-confidence inference; validate with analytics or user evidence.' : 'Low-confidence signal; manual review only.'}`;
+  return `### ${finding.priority}: ${finding.title}
+- Tipo: ${finding.type}
+- Área afectada: ${finding.affectedArea}
+- Severidad/confianza: ${finding.severity}/5 · ${finding.confidence}
+- Impacto/esfuerzo: ${translateImpact(finding.impact)} · ${translateEffort(finding.effort)}
+- Evidencia: ${finding.evidence.length ? finding.evidence.map(escapePipes).join('; ') : 'Sin evidencia automática fuerte.'}
+- Rationale: ${finding.rationale}${uncertainty}`;
+}
+
+function buildHypothesisCards(hypotheses = []) {
+  if (!hypotheses.length) return '- No se generaron hipótesis medibles.';
+  return hypotheses.map(formatHypothesisCard).join('\n\n');
+}
+
+function formatHypothesisCard(hypothesis) {
+  return `### ${hypothesis.id}: ${hypothesis.title}
+- Because: ${hypothesis.because}
+- We believe: ${hypothesis.weBelieve}
+- If we: ${hypothesis.ifWe}
+- Then: ${hypothesis.then}
+- Primary metric: ${hypothesis.metrics.primary}
+- Secondary metrics: ${hypothesis.metrics.secondary.join(', ')}
+- Guardrails: ${hypothesis.metrics.guardrail.join(', ')}
+- Segments: ${hypothesis.segments.join(', ')}
+- Confidence/effort: ${hypothesis.confidence} · ${hypothesis.effort}
+- Experiment type: ${hypothesis.experimentType}`;
+}
+
+function isConversionGuidance(item = '') {
+  return /primary CTA|CTA principal|conversi[oó]n|decision block|bloque de decisi[oó]n/i.test(item);
+}
+
+function buildGithubTopFindings(findings = []) {
+  if (!findings.length) return '- No findings were generated. Use this as a baseline/manual review task.';
+  return findings.slice(0, 5).map(finding => `### ${finding.title}
+- Type: ${finding.type}
+- Priority: ${finding.priority}
+- Evidence: ${finding.evidence?.[0] || 'No strong automatic evidence.'}
+- Recommendation: ${finding.rationale || 'Review manually before changing the page.'}
+- Confidence: ${finding.confidence}`).join('\n\n');
+}
+
+function buildGithubHypotheses(hypotheses = []) {
+  if (!hypotheses.length) return '- No hypotheses generated.';
+  return hypotheses.map(hypothesis => `### ${hypothesis.id}: ${hypothesis.title}
+- If we: ${hypothesis.ifWe}
+- Then: ${hypothesis.then}
+- Primary metric: ${hypothesis.metrics.primary}
+- Guardrails: ${hypothesis.metrics.guardrail.join(', ')}`).join('\n\n');
+}
+
+function githubComponentsAffected(components = []) {
+  const names = components
+    .filter(component => Number(component.count) > 0)
+    .map(component => `${component.name} (${component.count})`)
+    .slice(0, 6);
+  return names.join(', ') || 'none detected';
+}
+
+function githubTokensAffected(tokens = {}, findings = []) {
+  const hasDesignDebt = findings.some(finding => finding.type === 'design_system_debt');
+  const colorRolesNeedReview = (tokens.colors || []).filter(color => color.roleConfidence === 'low' || color.suggestedRole === 'unknown').slice(0, 3);
+  const notes = [];
+
+  if (hasDesignDebt) {
+    if ((tokens.spacing || []).length) notes.push(`spacing (${tokens.spacing.length} detected)`);
+    if ((tokens.radius || []).length) notes.push(`radius (${tokens.radius.length} detected)`);
+    if ((tokens.colors || []).length) notes.push(`colors (${tokens.colors.length} detected)`);
+  }
+  if (colorRolesNeedReview.length) notes.push(`color roles to validate: ${colorRolesNeedReview.map(color => color.value).join(', ')}`);
+
+  return notes.join('; ') || 'none beyond normal design-system review';
+}
+
+function githubAccessibilityChecks(components = [], accessibilityFindings = []) {
+  const checks = [];
+  if (accessibilityFindings.length) checks.push(`${accessibilityFindings.length} accessibility finding(s)`);
+  if (components.some(component => component.name === 'Form field')) checks.push('form labels/help/error states');
+  if (components.some(component => component.name === 'Button' || component.name === 'Link')) checks.push('keyboard focus and accessible names');
+  checks.push('contrast and focus visible');
+  return Array.from(new Set(checks)).join(', ');
+}
+
+function formatViewport(viewport = {}) {
+  if (!viewport.width && !viewport.height) return 'unknown';
+  return `${viewport.width || 'unknown'}x${viewport.height || 'unknown'}`;
+}
+
+function formatList(items = []) {
+  return items.length ? items.join(', ') : 'none';
 }
 
 function buildGithubEvidence(snapshot = {}, report = {}) {
@@ -2226,8 +3460,8 @@ function formatTokenValues(items = [], limit = 8) {
 
 function roleConfidenceFromName(role) {
   if (!role || role === 'unknown' || role === 'sin mapear') return 'unknown';
-  if (String(role).includes('candidato') || String(role).includes('possible')) return 'possible';
-  return 'likely';
+  if (String(role).includes('candidato') || String(role).includes('possible')) return 'low';
+  return 'medium';
 }
 
 function count(value) {
@@ -2306,10 +3540,6 @@ function recommendComponent(instances, risk, promotionThreshold) {
   return 'keep_local';
 }
 
-function formatBehavioralMapRow(block) {
-  return `| ${block.label} | ${block.present} | ${block.quality} | ${escapePipes(block.evidence.slice(0, 2).join('; ') || 'Sin evidencia suficiente')} | ${escapePipes(block.detectedFriction || block.missing[0] || 'Sin fricción clara')} | ${block.severity} |`;
-}
-
 function formatFriction(friction, index) {
   return `### Fricción #${index}: ${friction.title}
 - Prioridad: ${friction.priority} · score ${friction.priorityScore}
@@ -2368,24 +3598,16 @@ function buildTokenRows(colors, typography, spacing) {
 
 function buildPatternList(components, behavioralMapping) {
   const patterns = [];
-  if (behavioralMapping.find(block => block.block === 'what')?.present !== 'no') patterns.push('- Hero');
-  if (components.counts.navigation) patterns.push('- Header / navegación');
-  if (components.counts.buttons) patterns.push('- CTA primario / grupo de acciones');
-  if (components.counts.cards >= 3) patterns.push('- Cards de beneficios o features');
-  if (components.counts.forms) patterns.push('- Formulario');
-  if (behavioralMapping.find(block => block.block === 'why_not')?.present !== 'no') patterns.push('- FAQ / confianza / reducción de riesgo');
+  const counts = components.counts || {};
+  const hasWhat = behavioralMapping.find(block => block.block === 'what')?.present;
+  const hasWhyNot = behavioralMapping.find(block => block.block === 'why_not')?.present;
+  if (hasWhat && hasWhat !== 'no') patterns.push('- Hero');
+  if (counts.navigation) patterns.push('- Header / navegación');
+  if (counts.buttons) patterns.push('- CTA primario / grupo de acciones');
+  if (counts.cards >= 3) patterns.push('- Cards de beneficios o features');
+  if (counts.forms) patterns.push('- Formulario');
+  if (hasWhyNot && hasWhyNot !== 'no') patterns.push('- FAQ / confianza / reducción de riesgo');
   return patterns.join('\n') || '- No se detectan patrones UI suficientes por heurística.';
-}
-
-function buildPrioritizationRows(frictions, behavioralMapping) {
-  const rows = frictions.slice(0, 6).map(friction => `| ${friction.priority} | ${escapePipes(friction.recommendation)} | ${friction.typeLabel || friction.type} | ${translateImpact(friction.expectedImpact)} | ${translateEffort(friction.implementationEffort)} | ${escapePipes(friction.systemImplication || 'Revisión de sistema de diseño')} |`);
-  if (rows.length) return rows.join('\n');
-
-  return behavioralMapping
-    .filter(block => block.present !== 'sí')
-    .slice(0, 4)
-    .map(block => `| ${block.block === 'what' || block.block === 'where' ? 'P0' : 'P1'} | Reforzar ${block.label} | ${escapePipes(block.frictionType)} | Medio | Medio | Contenido + patrón UI |`)
-    .join('\n') || '| P2 | Revisión manual | Validación heurística | Bajo | Bajo | Ninguna |';
 }
 
 function formatReportValue(value) {
@@ -2431,28 +3653,56 @@ function buildWhatWorks(behavioralMapping) {
   return strong.join('\n') || '- No hay suficientes señales fuertes; conviene validar manualmente.';
 }
 
-function buildWhatBlocks(frictions, behavioralMapping) {
-  const top = frictions.slice(0, 3).map(friction => `- ${friction.priority}: ${friction.title}`);
-  if (top.length) return top.join('\n');
-  const weak = behavioralMapping.filter(block => block.present === 'no' || block.quality <= 2).map(block => `- ${block.label}: ${block.missing[0] || 'bloque débil'}`);
-  return weak.join('\n') || '- No se detectan bloqueos heurísticos relevantes.';
-}
-
-function buildMinimumChanges(frictions, behavioralMapping) {
-  const top = frictions.filter(friction => friction.priority === 'P0' || friction.priority === 'P1').slice(0, 3).map(friction => `- ${friction.recommendation}`);
-  if (top.length) return top.join('\n');
-  return behavioralMapping.filter(block => block.present !== 'sí').slice(0, 3).map(block => `- ${block.recommendation}`).join('\n') || '- Mantener estructura y medir antes de rediseñar.';
-}
-
-function buildNextExperiment(frictions, behavioralMapping) {
-  const top = frictions[0];
-  if (top) return `Probar una variante que resuelva “${top.title}” y medir ${getMetricForBlock(top.block, behavioralMapping)} frente a la versión actual.`;
+function buildNextExperiment(hypotheses, behavioralMapping) {
+  const top = hypotheses[0];
+  if (top) return `${top.id}: ${top.title}. ${top.ifWe} Medir ${top.metrics.primary}; guardrails: ${top.metrics.guardrail.join(', ')}. Tipo: ${top.experimentType}.`;
   const weak = behavioralMapping.find(block => block.present === 'no' || block.quality <= 2);
-  return weak ? `Probar una variante que refuerce ${weak.label} y medir ${weak.metrics[0] || 'conversión final'}.` : 'Mantener la versión actual y usar el briefing como baseline para futuras iteraciones.';
+  return weak ? `Use the current page as baseline and validate ${weak.label} before changing the experience.` : 'Use the current page as baseline and validate the next measurable question before changing the experience.';
 }
 
-function getMetricForBlock(block, behavioralMapping) {
-  return behavioralMapping.find(item => item.block === block)?.metrics[0] || 'conversión final';
+function buildHighConfidenceRisks(findings = []) {
+  const risks = findings
+    .filter(finding => finding.confidence === 'high' && ['P0', 'P1'].includes(finding.priority) && finding.type !== 'design_system_debt')
+    .map(finding => `- ${finding.priority}: ${finding.title}. Evidence: ${finding.evidence[0] || 'not available'}`);
+  return risks.join('\n') || '- No se detectan fricciones UX de alta confianza.';
+}
+
+function buildManualReviewSummary(findings = [], behavioralMapping = []) {
+  const reviewFindings = findings
+    .filter(finding => finding.priority === 'Review' || finding.confidence === 'low')
+    .map(finding => `- ${finding.title}: ${finding.rationale}`);
+  const weakBlocks = getWeakBlocks(behavioralMapping)
+    .map(block => `- Weak block ${block.label}: ${block.missing?.[0] || 'needs manual review'}`);
+  return [...reviewFindings, ...weakBlocks].join('\n') || '- No manual review items detected beyond normal QA.';
+}
+
+function buildDesignSystemDebtSummary(findings = []) {
+  return findings
+    .map(finding => `- ${finding.priority}: ${finding.title}. Evidence: ${finding.evidence[0] || 'not available'}`)
+    .join('\n') || '- No design system debt findings detected.';
+}
+
+function buildRecommendedMetrics(hypotheses = []) {
+  const primary = new Set();
+  const secondary = new Set();
+  const guardrail = new Set();
+
+  for (const hypothesis of hypotheses) {
+    if (hypothesis.metrics?.primary) primary.add(hypothesis.metrics.primary);
+    for (const metric of hypothesis.metrics?.secondary || []) secondary.add(metric);
+    for (const metric of hypothesis.metrics?.guardrail || []) guardrail.add(metric);
+  }
+
+  return [
+    '### Primary',
+    ...(primary.size ? Array.from(primary).map(metric => `- ${metric}`) : ['- primary task completion rate']),
+    '',
+    '### Secondary',
+    ...(secondary.size ? Array.from(secondary).map(metric => `- ${metric}`) : ['- primary CTA CTR', '- bounce rate']),
+    '',
+    '### Guardrails',
+    ...(guardrail.size ? Array.from(guardrail).map(metric => `- ${metric}`) : ['- no accessibility regressions'])
+  ].join('\n');
 }
 
 function translateImpact(value) {
@@ -2489,9 +3739,19 @@ function createSnapshot() {
   const typography = collectTypography(root);
   const spacing = collectSpacing(root);
   const components = collectComponents(root);
-  const frictions = detectFrictions({ colors, typography, spacing, components }, root);
-  const behavioralMapping = buildBehavioralMapping({ components, frictions }, root);
-  const behavioralRecommendation = buildBehavioralStructureRecommendation({ behavioralMapping, frictions });
+  const scopeMap = detectDomRegions(root);
+  const pageClassification = pageArchetypeClassifier({
+    url: window.location.href,
+    title: document.title,
+    components
+  }, scopeMap.behavioralRoot);
+  const fullBehavioral = shouldRunFullBehavioralAnalysis(pageClassification);
+  const behavioralComponents = fullBehavioral ? collectComponents(scopeMap.behavioralRoot) : components;
+  const frictions = fullBehavioral ? detectFrictions({ colors, typography, spacing, components: behavioralComponents }, scopeMap.behavioralRoot) : [];
+  const behavioralMapping = fullBehavioral ? buildBehavioralMapping({ components: behavioralComponents, frictions }, scopeMap.behavioralRoot) : [];
+  const behavioralRecommendation = fullBehavioral ? buildBehavioralStructureRecommendation({ behavioralMapping, frictions }) : { sections: [] };
+  const findings = buildFindings({ frictions, behavioralMapping });
+  const hypotheses = generateHypotheses(findings, pageClassification);
 
   return {
     meta: {
@@ -2507,7 +3767,15 @@ function createSnapshot() {
     typography,
     spacing,
     components,
+    scopeMap: {
+      regions: scopeMap.regions,
+      usedForBehavioral: scopeMap.usedForBehavioral,
+      excludedFromBehavioral: scopeMap.excludedFromBehavioral
+    },
+    pageClassification,
     frictions,
+    findings,
+    hypotheses,
     behavioralMapping,
     behavioralRecommendation
   };
@@ -2534,8 +3802,14 @@ function renderPanel(snapshot) {
         width: min(448px, calc(100vw - 28px));
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         color: #151515;
+        -webkit-font-smoothing: antialiased;
       }
       * { box-sizing: border-box; }
+      button:focus-visible,
+      [tabindex]:focus-visible {
+        outline: 3px solid #0e7c66;
+        outline-offset: 2px;
+      }
       .panel {
         height: 100%;
         background: #f6f8f7;
@@ -2601,14 +3875,15 @@ function renderPanel(snapshot) {
       .close {
         border: 0;
         border-radius: 8px;
-        width: 36px;
-        height: 36px;
+        width: 40px;
+        height: 40px;
         background: #eef4f0;
         color: #151515;
         cursor: pointer;
         font: inherit;
         font-size: 18px;
         line-height: 18px;
+        transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms cubic-bezier(0.2, 0, 0, 1);
       }
       .body {
         overflow: auto;
@@ -2686,6 +3961,7 @@ function renderPanel(snapshot) {
         font-size: 24px;
         line-height: 28px;
         font-weight: 850;
+        font-variant-numeric: tabular-nums;
       }
       .metric span {
         display: block;
@@ -2757,8 +4033,9 @@ function renderPanel(snapshot) {
       }
       .component-line,
       .mapping-row {
-        display: flex;
-        gap: 10px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
         align-items: center;
         justify-content: space-between;
         border: 1px solid #d7ded8;
@@ -2772,6 +4049,21 @@ function renderPanel(snapshot) {
       .mapping-list {
         display: grid;
         gap: 7px;
+      }
+      .mapping-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: 6px;
+      }
+      .mapping-copy {
+        min-width: 0;
+      }
+      .mapping-copy strong {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .pill {
         display: inline-flex;
@@ -2817,6 +4109,17 @@ function renderPanel(snapshot) {
         line-height: 18px;
         color: #5f6761;
       }
+      .top-findings {
+        display: grid;
+        gap: 7px;
+      }
+      .finding-type {
+        color: #075f4d;
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: .02em;
+        text-transform: uppercase;
+      }
       .actions {
         display: grid;
         gap: 8px;
@@ -2840,6 +4143,11 @@ function renderPanel(snapshot) {
         font-size: 13px;
         font-weight: 850;
         cursor: pointer;
+        transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms cubic-bezier(0.2, 0, 0, 1);
+      }
+      button.copy:active,
+      .close:active {
+        transform: scale(0.96);
       }
       button.copy.secondary {
         background: #eef4f0;
@@ -2876,16 +4184,26 @@ function renderPanel(snapshot) {
   }, ['×']);
 
   const weakBlocksCount = snapshot.behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).length;
-  const summaryText = snapshot.frictions.length
-    ? `${snapshot.frictions.length} señales para revisar antes del handoff.`
-    : 'La pantalla no muestra fricciones heurísticas relevantes.';
+  const classification = snapshot.pageClassification || {};
+  const findings = snapshot.findings || [];
+  const findingGroups = groupFindings(findings);
+  const uxFrictionCount = findingGroups.ux.filter(finding => finding.confidence === 'high' && finding.priority !== 'Review').length;
+  const manualReviewCount = findingGroups.manualReview.length + findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review').length;
+  const dsRiskCount = findingGroups.designSystem.length;
+  const summaryText = uxFrictionCount > 0
+    ? `${uxFrictionCount} fricción(es) UX de alta confianza.`
+    : weakBlocksCount > 0
+      ? 'No se detectan fricciones UX de alta confianza. Hay bloques que conviene revisar.'
+      : classification.analysisMode === 'full_behavioral'
+        ? 'No se detectan fricciones UX de alta confianza.'
+        : 'Análisis behavioral limitado por arquetipo de página.';
   const componentSummary = `Botones ${snapshot.components.counts.buttons} · Inputs ${snapshot.components.counts.inputs} · Enlaces ${snapshot.components.counts.links} · Tarjetas ${snapshot.components.counts.cards}`;
 
   const heroSummary = element('div', { class: 'hero-summary' }, [
     element('div', { class: 'score' }, [
       element('div', {}, [
         element('strong', {}, [String(snapshot.frictions.length)]),
-        element('span', {}, ['Fricciones'])
+        element('span', {}, ['Señales raw'])
       ])
     ]),
     element('div', { class: 'summary-copy' }, [
@@ -2895,10 +4213,10 @@ function renderPanel(snapshot) {
   ]);
 
   const grid = element('div', { class: 'grid' }, [
-    metric('Colores', snapshot.colors.totalUniqueColors),
-    metric('Tipografías', snapshot.typography.totalUniqueTypeStyles),
-    metric('Espaciados', snapshot.spacing.totalUniqueSpacingValues),
-    metric('Bloques débiles', weakBlocksCount)
+    metric('UX frictions', uxFrictionCount),
+    metric('Weak blocks', weakBlocksCount),
+    metric('DS risks', dsRiskCount),
+    metric('Manual review', manualReviewCount)
   ]);
 
   const swatches = element('div', { class: 'swatches' });
@@ -2907,7 +4225,7 @@ function renderPanel(snapshot) {
       element('span', { class: 'swatch-chip', style: { background: color.value } }),
       element('span', {}, [
         element('span', { class: 'swatch-code' }, [color.value]),
-        element('span', { class: 'swatch-role' }, [`${color.suggestedRole || 'unknown'} · ${color.count}`])
+        element('span', { class: 'swatch-role', title: color.roleReason || '' }, [`${displayColorRole(color)} · ${color.count}`])
       ])
     ]));
   }
@@ -2916,16 +4234,27 @@ function renderPanel(snapshot) {
   }
 
   const mappingRows = snapshot.behavioralMapping.map(block => element('div', { class: 'mapping-row' }, [
-    element('span', {}, [block.label]),
-    element('span', { class: 'pill' }, [`${block.present} · ${block.quality}/5`])
+    element('div', { class: 'mapping-copy' }, [
+      element('strong', {}, [block.label]),
+      element('div', { class: 'mapping-meta' }, [
+        element('span', { class: 'pill' }, [presenceLabel(block.present)]),
+        element('span', { class: 'pill' }, [`score ${block.quality}/5`]),
+        element('span', { class: 'pill' }, [blockConfidence(block)])
+      ])
+    ]),
+    element('span', { class: 'pill' }, [block.block])
   ]));
 
-  const frictionNodes = snapshot.frictions.slice(0, 5).map(friction => element('div', { class: `friction ${severityClass(friction.severity)}` }, [
+  const topFindingNodes = topFindingsByType(findingGroups, findings).map(item => element('div', { class: `friction ${severityClass(item.finding.severity)}` }, [
     element('strong', {}, [
-      element('span', {}, [friction.title]),
-      element('span', { class: 'pill' }, [friction.severity])
+      element('span', {}, [
+        element('span', { class: 'finding-type' }, [item.type]),
+        ' ',
+        item.finding.title
+      ]),
+      element('span', { class: 'pill' }, [item.finding.priority])
     ]),
-    element('p', {}, [`${friction.principle || 'revisión heurística'} · ${friction.recommendation}`])
+    element('p', {}, [`${item.finding.confidence} confidence · ${item.finding.rationale}`])
   ]));
 
   const body = element('div', { class: 'body' }, [
@@ -2946,13 +4275,30 @@ function renderPanel(snapshot) {
       ])
     ]),
     element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Mapa behavioral']),
-      element('div', { class: 'mapping-list' }, mappingRows)
+      element('h3', { class: 'section-title' }, ['Clasificación']),
+      element('div', { class: 'component-line' }, [
+        element('span', {}, [`${classification.archetype || 'unknown'} · ${classification.confidence || 'low'}`]),
+        element('span', { class: 'pill' }, [classification.analysisMode || 'snapshot_only'])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, [classification.analysisMode === 'full_behavioral' ? 'Mapa behavioral' : 'Revisión manual']),
+      ...(classification.analysisMode === 'full_behavioral'
+        ? (mappingRows.length ? [element('div', { class: 'mapping-list' }, mappingRows)] : [element('p', { class: 'notice' }, ['No hay mapa behavioral disponible.'])])
+        : [element('p', { class: 'notice' }, ['No se generan recomendaciones de conversión con la matriz behavioral actual para este arquetipo.'])])
     ]),
     element('section', { class: 'section' }, [
       element('h3', { class: 'section-title' }, ['Lente conductual']),
-      ...(frictionNodes.length ? frictionNodes : [
-        element('p', { class: 'notice' }, ['No se detectan fricciones heurísticas relevantes. Se recomienda revisión manual.'])
+      ...(classification.analysisMode === 'full_behavioral' ? [
+        element('p', { class: 'notice' }, [uxFrictionCount ? 'Hay fricciones UX de alta confianza; revisar hypothesis cards antes de actuar.' : 'No se detectan fricciones UX de alta confianza. Los weak blocks son revisión, no bloqueo crítico.'])
+      ] : [
+        element('p', { class: 'notice' }, ['Salida acotada a snapshot, inventario, accesibilidad y notas manuales.'])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Top findings']),
+      ...(topFindingNodes.length ? [element('div', { class: 'top-findings' }, topFindingNodes)] : [
+        element('p', { class: 'notice' }, ['No hay findings priorizados. Revisa el markdown para baseline y notas manuales.'])
       ])
     ])
   ]);
@@ -2967,14 +4313,14 @@ function renderPanel(snapshot) {
     'Salida heurística. Úsala como apoyo de revisión de producto/diseño, no como verdad absoluta.'
   ]);
 
-  const panel = element('div', { class: 'panel', role: 'dialog', 'aria-modal': 'false' }, [
+  const panel = element('div', { class: 'panel', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'contextic-title' }, [
     element('header', { class: 'panel-header' }, [
       element('div', { class: 'brand' }, [
         element('span', { class: 'brand-mark' }, ['C']),
         element('div', {}, [
           element('p', { class: 'kicker' }, ['Design context']),
-          element('h2', {}, ['Contextic']),
-          element('p', { class: 'subtitle' }, ['Tokens, componentes y fricciones listas para handoff.'])
+          element('h2', { id: 'contextic-title' }, ['Contextic']),
+          element('p', { class: 'subtitle' }, ['Evidencia, confianza e hipótesis listas para handoff.'])
         ])
       ]),
       closeButton
@@ -2989,7 +4335,15 @@ function renderPanel(snapshot) {
 
   shadow.append(style, panel);
 
-  closeButton.addEventListener('click', () => host.remove());
+  const removePanel = () => host.remove();
+  closeButton.addEventListener('click', removePanel);
+  shadow.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      removePanel();
+    }
+  });
+  closeButton.focus({ preventScroll: true });
   copyButtons.forEach(button => {
     button.addEventListener('click', async () => {
       const key = button.getAttribute('data-copy');
@@ -3008,6 +4362,47 @@ function metric(label, value) {
     element('strong', {}, [String(value)]),
     element('span', {}, [label])
   ]);
+}
+
+function presenceLabel(value = '') {
+  if (value === 'sí') return 'present';
+  if (value === 'parcial') return 'partial';
+  if (value === 'no') return 'missing';
+  return value || 'unknown';
+}
+
+function blockConfidence(block = {}) {
+  if (block.present === 'sí' && block.quality >= 4 && (block.evidence || []).length >= 2) return 'high';
+  if (block.present === 'parcial' || (block.evidence || []).length) return 'medium';
+  return 'low';
+}
+
+function topFindingsByType(groups = {}, findings = []) {
+  const buckets = [
+    ['UX', groups.ux || []],
+    ['DS', groups.designSystem || []],
+    ['Accessibility', groups.accessibility || []],
+    ['Review', [...(groups.manualReview || []), ...findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review')]]
+  ];
+  const items = [];
+
+  for (const [type, findings] of buckets) {
+    const finding = findings[0];
+    if (finding) items.push({ type, finding });
+    if (items.length >= 3) break;
+  }
+
+  return items;
+}
+
+function displayColorRole(color = {}) {
+  const role = color.suggestedRole || 'unknown';
+  const confidence = color.roleConfidence || 'low';
+  if (confidence === 'low') {
+    if (role === 'error' || role === 'success') return 'unknown';
+    if (role !== 'unknown') return `${role}?`;
+  }
+  return role;
 }
 
 function severityClass(severity = '') {

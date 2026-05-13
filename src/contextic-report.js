@@ -1,3 +1,6 @@
+import { buildFindings } from './findings-prioritization.js';
+import { generateHypotheses } from './hypotheses.js';
+
 const TOOL_NAME = 'Contextic';
 const LANGUAGE = 'es';
 
@@ -6,9 +9,22 @@ export function buildContexticReport(snapshot = {}) {
   const typography = snapshot.typography || {};
   const spacing = snapshot.spacing || {};
   const components = snapshot.components || {};
+  const scopeMap = snapshot.scopeMap || {
+    regions: {},
+    usedForBehavioral: [],
+    excludedFromBehavioral: []
+  };
+  const pageClassification = snapshot.pageClassification || {
+    archetype: 'unknown',
+    confidence: 'low',
+    signals: ['No hay clasificación de arquetipo disponible en el snapshot.'],
+    analysisMode: 'snapshot_only'
+  };
   const behavioralMapping = snapshot.behavioralMapping || [];
   const frictions = snapshot.frictions || [];
   const behavioralRecommendation = snapshot.behavioralRecommendation || {};
+  const findings = snapshot.findings || buildFindings(snapshot);
+  const hypotheses = snapshot.hypotheses || generateHypotheses(findings, pageClassification);
 
   return {
     meta: {
@@ -25,6 +41,8 @@ export function buildContexticReport(snapshot = {}) {
       primaryConversionAction: getPrimaryActionLabel(components),
       mainConversionRisk: getMainConversionRisk(frictions, behavioralMapping)
     },
+    pageClassification,
+    scopeMap,
     detectedTokens: {
       colors: colors.colors || [],
       cssVariables: colors.cssVariables || [],
@@ -35,6 +53,8 @@ export function buildContexticReport(snapshot = {}) {
       borders: spacing.borders || []
     },
     detectedComponents: buildDetectedComponents(components),
+    findings,
+    hypotheses,
     behavioralMapping: normalizeBehavioralMapping(behavioralMapping),
     uxFrictions: frictions.map(normalizeFrictionForReport),
     implementationRules: buildImplementationRules(behavioralRecommendation),

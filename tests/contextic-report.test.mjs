@@ -10,8 +10,12 @@ test('buildContexticReport returns the expected root keys', () => {
   assert.deepEqual(Object.keys(report), [
     'meta',
     'screenSummary',
+    'pageClassification',
+    'scopeMap',
     'detectedTokens',
     'detectedComponents',
+    'findings',
+    'hypotheses',
     'behavioralMapping',
     'uxFrictions',
     'implementationRules',
@@ -22,6 +26,7 @@ test('buildContexticReport returns the expected root keys', () => {
 
   assert.equal(report.meta.toolName, 'Contextic');
   assert.equal(report.meta.language, 'es');
+  assert.equal(report.pageClassification.archetype, 'landing');
 });
 
 test('uxFrictions preserves normalized behavioral findings', () => {
@@ -106,6 +111,20 @@ function createSnapshot(overrides = {}) {
       samples: {
         buttons: [{ text: 'Crear mi plan' }]
       }
+    },
+    pageClassification: {
+      archetype: 'landing',
+      confidence: 'medium',
+      signals: ['Fixture landing con CTA.'],
+      analysisMode: 'full_behavioral'
+    },
+    scopeMap: {
+      regions: { main: 4, header: 2, footer: 1 },
+      usedForBehavioral: ['main'],
+      excludedFromBehavioral: [
+        { region: 'header', reason: 'global header excluded from behavioral scoring' },
+        { region: 'footer', reason: 'footer/contentinfo excluded from behavioral scoring' }
+      ]
     },
     behavioralMapping: [
       {

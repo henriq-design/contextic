@@ -369,6 +369,8 @@ function getBlockRisks(block) {
 }
 
 function getVisiblePageText(root) {
+  if (root?.__contexticBehavioralScope) return root.__contexticText || '';
+
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       const parent = node.parentElement;

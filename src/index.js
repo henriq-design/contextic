@@ -4,6 +4,10 @@ import { collectSpacing } from './collect-spacing.js';
 import { collectComponents } from './collect-components.js';
 import { detectFrictions } from './detect-frictions.js';
 import { buildBehavioralMapping, buildBehavioralStructureRecommendation } from './behavioral-model.js';
+import { pageArchetypeClassifier, shouldRunFullBehavioralAnalysis } from './page-archetype-classifier.js';
+import { detectDomRegions } from './dom-regions.js';
+import { buildFindings, groupFindings } from './findings-prioritization.js';
+import { generateHypotheses } from './hypotheses.js';
 import { buildDesignContextMarkdown, buildGithubIssueExport, buildJsonExport } from './export-markdown.js';
 
 const PANEL_ID = 'contextic-panel';
@@ -25,9 +29,19 @@ function createSnapshot() {
   const typography = collectTypography(root);
   const spacing = collectSpacing(root);
   const components = collectComponents(root);
-  const frictions = detectFrictions({ colors, typography, spacing, components }, root);
-  const behavioralMapping = buildBehavioralMapping({ components, frictions }, root);
-  const behavioralRecommendation = buildBehavioralStructureRecommendation({ behavioralMapping, frictions });
+  const scopeMap = detectDomRegions(root);
+  const pageClassification = pageArchetypeClassifier({
+    url: window.location.href,
+    title: document.title,
+    components
+  }, scopeMap.behavioralRoot);
+  const fullBehavioral = shouldRunFullBehavioralAnalysis(pageClassification);
+  const behavioralComponents = fullBehavioral ? collectComponents(scopeMap.behavioralRoot) : components;
+  const frictions = fullBehavioral ? detectFrictions({ colors, typography, spacing, components: behavioralComponents }, scopeMap.behavioralRoot) : [];
+  const behavioralMapping = fullBehavioral ? buildBehavioralMapping({ components: behavioralComponents, frictions }, scopeMap.behavioralRoot) : [];
+  const behavioralRecommendation = fullBehavioral ? buildBehavioralStructureRecommendation({ behavioralMapping, frictions }) : { sections: [] };
+  const findings = buildFindings({ frictions, behavioralMapping });
+  const hypotheses = generateHypotheses(findings, pageClassification);
 
   return {
     meta: {
@@ -43,7 +57,15 @@ function createSnapshot() {
     typography,
     spacing,
     components,
+    scopeMap: {
+      regions: scopeMap.regions,
+      usedForBehavioral: scopeMap.usedForBehavioral,
+      excludedFromBehavioral: scopeMap.excludedFromBehavioral
+    },
+    pageClassification,
     frictions,
+    findings,
+    hypotheses,
     behavioralMapping,
     behavioralRecommendation
   };
@@ -70,8 +92,14 @@ function renderPanel(snapshot) {
         width: min(448px, calc(100vw - 28px));
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         color: #151515;
+        -webkit-font-smoothing: antialiased;
       }
       * { box-sizing: border-box; }
+      button:focus-visible,
+      [tabindex]:focus-visible {
+        outline: 3px solid #0e7c66;
+        outline-offset: 2px;
+      }
       .panel {
         height: 100%;
         background: #f6f8f7;
@@ -137,14 +165,15 @@ function renderPanel(snapshot) {
       .close {
         border: 0;
         border-radius: 8px;
-        width: 36px;
-        height: 36px;
+        width: 40px;
+        height: 40px;
         background: #eef4f0;
         color: #151515;
         cursor: pointer;
         font: inherit;
         font-size: 18px;
         line-height: 18px;
+        transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms cubic-bezier(0.2, 0, 0, 1);
       }
       .body {
         overflow: auto;
@@ -222,6 +251,7 @@ function renderPanel(snapshot) {
         font-size: 24px;
         line-height: 28px;
         font-weight: 850;
+        font-variant-numeric: tabular-nums;
       }
       .metric span {
         display: block;
@@ -293,8 +323,9 @@ function renderPanel(snapshot) {
       }
       .component-line,
       .mapping-row {
-        display: flex;
-        gap: 10px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
         align-items: center;
         justify-content: space-between;
         border: 1px solid #d7ded8;
@@ -308,6 +339,21 @@ function renderPanel(snapshot) {
       .mapping-list {
         display: grid;
         gap: 7px;
+      }
+      .mapping-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        margin-top: 6px;
+      }
+      .mapping-copy {
+        min-width: 0;
+      }
+      .mapping-copy strong {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .pill {
         display: inline-flex;
@@ -353,6 +399,17 @@ function renderPanel(snapshot) {
         line-height: 18px;
         color: #5f6761;
       }
+      .top-findings {
+        display: grid;
+        gap: 7px;
+      }
+      .finding-type {
+        color: #075f4d;
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: .02em;
+        text-transform: uppercase;
+      }
       .actions {
         display: grid;
         gap: 8px;
@@ -376,6 +433,11 @@ function renderPanel(snapshot) {
         font-size: 13px;
         font-weight: 850;
         cursor: pointer;
+        transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms cubic-bezier(0.2, 0, 0, 1);
+      }
+      button.copy:active,
+      .close:active {
+        transform: scale(0.96);
       }
       button.copy.secondary {
         background: #eef4f0;
@@ -412,16 +474,26 @@ function renderPanel(snapshot) {
   }, ['×']);
 
   const weakBlocksCount = snapshot.behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).length;
-  const summaryText = snapshot.frictions.length
-    ? `${snapshot.frictions.length} señales para revisar antes del handoff.`
-    : 'La pantalla no muestra fricciones heurísticas relevantes.';
+  const classification = snapshot.pageClassification || {};
+  const findings = snapshot.findings || [];
+  const findingGroups = groupFindings(findings);
+  const uxFrictionCount = findingGroups.ux.filter(finding => finding.confidence === 'high' && finding.priority !== 'Review').length;
+  const manualReviewCount = findingGroups.manualReview.length + findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review').length;
+  const dsRiskCount = findingGroups.designSystem.length;
+  const summaryText = uxFrictionCount > 0
+    ? `${uxFrictionCount} fricción(es) UX de alta confianza.`
+    : weakBlocksCount > 0
+      ? 'No se detectan fricciones UX de alta confianza. Hay bloques que conviene revisar.'
+      : classification.analysisMode === 'full_behavioral'
+        ? 'No se detectan fricciones UX de alta confianza.'
+        : 'Análisis behavioral limitado por arquetipo de página.';
   const componentSummary = `Botones ${snapshot.components.counts.buttons} · Inputs ${snapshot.components.counts.inputs} · Enlaces ${snapshot.components.counts.links} · Tarjetas ${snapshot.components.counts.cards}`;
 
   const heroSummary = element('div', { class: 'hero-summary' }, [
     element('div', { class: 'score' }, [
       element('div', {}, [
         element('strong', {}, [String(snapshot.frictions.length)]),
-        element('span', {}, ['Fricciones'])
+        element('span', {}, ['Señales raw'])
       ])
     ]),
     element('div', { class: 'summary-copy' }, [
@@ -431,10 +503,10 @@ function renderPanel(snapshot) {
   ]);
 
   const grid = element('div', { class: 'grid' }, [
-    metric('Colores', snapshot.colors.totalUniqueColors),
-    metric('Tipografías', snapshot.typography.totalUniqueTypeStyles),
-    metric('Espaciados', snapshot.spacing.totalUniqueSpacingValues),
-    metric('Bloques débiles', weakBlocksCount)
+    metric('UX frictions', uxFrictionCount),
+    metric('Weak blocks', weakBlocksCount),
+    metric('DS risks', dsRiskCount),
+    metric('Manual review', manualReviewCount)
   ]);
 
   const swatches = element('div', { class: 'swatches' });
@@ -443,7 +515,7 @@ function renderPanel(snapshot) {
       element('span', { class: 'swatch-chip', style: { background: color.value } }),
       element('span', {}, [
         element('span', { class: 'swatch-code' }, [color.value]),
-        element('span', { class: 'swatch-role' }, [`${color.suggestedRole || 'unknown'} · ${color.count}`])
+        element('span', { class: 'swatch-role', title: color.roleReason || '' }, [`${displayColorRole(color)} · ${color.count}`])
       ])
     ]));
   }
@@ -452,16 +524,27 @@ function renderPanel(snapshot) {
   }
 
   const mappingRows = snapshot.behavioralMapping.map(block => element('div', { class: 'mapping-row' }, [
-    element('span', {}, [block.label]),
-    element('span', { class: 'pill' }, [`${block.present} · ${block.quality}/5`])
+    element('div', { class: 'mapping-copy' }, [
+      element('strong', {}, [block.label]),
+      element('div', { class: 'mapping-meta' }, [
+        element('span', { class: 'pill' }, [presenceLabel(block.present)]),
+        element('span', { class: 'pill' }, [`score ${block.quality}/5`]),
+        element('span', { class: 'pill' }, [blockConfidence(block)])
+      ])
+    ]),
+    element('span', { class: 'pill' }, [block.block])
   ]));
 
-  const frictionNodes = snapshot.frictions.slice(0, 5).map(friction => element('div', { class: `friction ${severityClass(friction.severity)}` }, [
+  const topFindingNodes = topFindingsByType(findingGroups, findings).map(item => element('div', { class: `friction ${severityClass(item.finding.severity)}` }, [
     element('strong', {}, [
-      element('span', {}, [friction.title]),
-      element('span', { class: 'pill' }, [friction.severity])
+      element('span', {}, [
+        element('span', { class: 'finding-type' }, [item.type]),
+        ' ',
+        item.finding.title
+      ]),
+      element('span', { class: 'pill' }, [item.finding.priority])
     ]),
-    element('p', {}, [`${friction.principle || 'revisión heurística'} · ${friction.recommendation}`])
+    element('p', {}, [`${item.finding.confidence} confidence · ${item.finding.rationale}`])
   ]));
 
   const body = element('div', { class: 'body' }, [
@@ -482,13 +565,30 @@ function renderPanel(snapshot) {
       ])
     ]),
     element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Mapa behavioral']),
-      element('div', { class: 'mapping-list' }, mappingRows)
+      element('h3', { class: 'section-title' }, ['Clasificación']),
+      element('div', { class: 'component-line' }, [
+        element('span', {}, [`${classification.archetype || 'unknown'} · ${classification.confidence || 'low'}`]),
+        element('span', { class: 'pill' }, [classification.analysisMode || 'snapshot_only'])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, [classification.analysisMode === 'full_behavioral' ? 'Mapa behavioral' : 'Revisión manual']),
+      ...(classification.analysisMode === 'full_behavioral'
+        ? (mappingRows.length ? [element('div', { class: 'mapping-list' }, mappingRows)] : [element('p', { class: 'notice' }, ['No hay mapa behavioral disponible.'])])
+        : [element('p', { class: 'notice' }, ['No se generan recomendaciones de conversión con la matriz behavioral actual para este arquetipo.'])])
     ]),
     element('section', { class: 'section' }, [
       element('h3', { class: 'section-title' }, ['Lente conductual']),
-      ...(frictionNodes.length ? frictionNodes : [
-        element('p', { class: 'notice' }, ['No se detectan fricciones heurísticas relevantes. Se recomienda revisión manual.'])
+      ...(classification.analysisMode === 'full_behavioral' ? [
+        element('p', { class: 'notice' }, [uxFrictionCount ? 'Hay fricciones UX de alta confianza; revisar hypothesis cards antes de actuar.' : 'No se detectan fricciones UX de alta confianza. Los weak blocks son revisión, no bloqueo crítico.'])
+      ] : [
+        element('p', { class: 'notice' }, ['Salida acotada a snapshot, inventario, accesibilidad y notas manuales.'])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Top findings']),
+      ...(topFindingNodes.length ? [element('div', { class: 'top-findings' }, topFindingNodes)] : [
+        element('p', { class: 'notice' }, ['No hay findings priorizados. Revisa el markdown para baseline y notas manuales.'])
       ])
     ])
   ]);
@@ -503,14 +603,14 @@ function renderPanel(snapshot) {
     'Salida heurística. Úsala como apoyo de revisión de producto/diseño, no como verdad absoluta.'
   ]);
 
-  const panel = element('div', { class: 'panel', role: 'dialog', 'aria-modal': 'false' }, [
+  const panel = element('div', { class: 'panel', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'contextic-title' }, [
     element('header', { class: 'panel-header' }, [
       element('div', { class: 'brand' }, [
         element('span', { class: 'brand-mark' }, ['C']),
         element('div', {}, [
           element('p', { class: 'kicker' }, ['Design context']),
-          element('h2', {}, ['Contextic']),
-          element('p', { class: 'subtitle' }, ['Tokens, componentes y fricciones listas para handoff.'])
+          element('h2', { id: 'contextic-title' }, ['Contextic']),
+          element('p', { class: 'subtitle' }, ['Evidencia, confianza e hipótesis listas para handoff.'])
         ])
       ]),
       closeButton
@@ -525,7 +625,15 @@ function renderPanel(snapshot) {
 
   shadow.append(style, panel);
 
-  closeButton.addEventListener('click', () => host.remove());
+  const removePanel = () => host.remove();
+  closeButton.addEventListener('click', removePanel);
+  shadow.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      removePanel();
+    }
+  });
+  closeButton.focus({ preventScroll: true });
   copyButtons.forEach(button => {
     button.addEventListener('click', async () => {
       const key = button.getAttribute('data-copy');
@@ -544,6 +652,47 @@ function metric(label, value) {
     element('strong', {}, [String(value)]),
     element('span', {}, [label])
   ]);
+}
+
+function presenceLabel(value = '') {
+  if (value === 'sí') return 'present';
+  if (value === 'parcial') return 'partial';
+  if (value === 'no') return 'missing';
+  return value || 'unknown';
+}
+
+function blockConfidence(block = {}) {
+  if (block.present === 'sí' && block.quality >= 4 && (block.evidence || []).length >= 2) return 'high';
+  if (block.present === 'parcial' || (block.evidence || []).length) return 'medium';
+  return 'low';
+}
+
+function topFindingsByType(groups = {}, findings = []) {
+  const buckets = [
+    ['UX', groups.ux || []],
+    ['DS', groups.designSystem || []],
+    ['Accessibility', groups.accessibility || []],
+    ['Review', [...(groups.manualReview || []), ...findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review')]]
+  ];
+  const items = [];
+
+  for (const [type, findings] of buckets) {
+    const finding = findings[0];
+    if (finding) items.push({ type, finding });
+    if (items.length >= 3) break;
+  }
+
+  return items;
+}
+
+function displayColorRole(color = {}) {
+  const role = color.suggestedRole || 'unknown';
+  const confidence = color.roleConfidence || 'low';
+  if (confidence === 'low') {
+    if (role === 'error' || role === 'success') return 'unknown';
+    if (role !== 'unknown') return `${role}?`;
+  }
+  return role;
 }
 
 function severityClass(severity = '') {
