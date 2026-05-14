@@ -139,7 +139,7 @@ test('interface source uses Spanish behavioral labels instead of visible English
   assert.doesNotMatch(source, /element\('strong', \{\}, \[block\.label\]\)/);
   assert.doesNotMatch(source, /'Weak blocks'|'Top findings'|'Manual review'/);
   assert.match(source, /behavioralBlockDisplayLabel/);
-  assert.match(source, /Bloques a revisar/);
+  assert.match(source, /Bloques débiles/);
   assert.match(source, /Hallazgos principales/);
 });
 

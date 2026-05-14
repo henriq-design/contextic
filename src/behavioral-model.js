@@ -502,13 +502,15 @@ function cleanCtaLabel(rawText, element) {
     visualMetadata.push(compactText(match, 40));
     return ' ';
   });
-  clean = compactText(clean.replace(/\s+/g, ' '), 100);
+  clean = compactText(clean.replace(/\s+/g, ' '), 100).trim();
 
   if (!clean && element?.getAttribute?.('title')) clean = compactText(element.getAttribute('title'), 100);
+  clean = clean.trim();
+  const fallbackRaw = raw.trim();
   const cleanLabelConfidence = clean && clean.length >= 3 ? 'high' : raw ? 'low' : 'none';
 
   return {
-    cleanLabel: clean || raw,
+    cleanLabel: clean || fallbackRaw,
     cleanLabelConfidence,
     rawText: raw,
     iconText,

@@ -70,6 +70,33 @@ test('copy exports can be generated from the same snapshot', () => {
   assert.match(githubIssue, /Acciones primarias compitiendo/);
 });
 
+test('Vodafone color table stays aligned with conservative color roles', () => {
+  const markdown = buildDesignContextMarkdown(createSnapshot({
+    colors: {
+      colors: [
+        colorToken('#0d0d0d', 2892, 'text', 'texto (text)', 'high', 'color', 'div.copy'),
+        colorToken('#ffffff', 2167, 'text', 'texto (text)', 'medium', 'color', 'a.skip-link'),
+        colorToken('#000000', 120, 'shadow', 'sombra (shadow)', 'medium', 'boxShadow', 'button.primary'),
+        colorToken('#e60000', 201, 'primary', 'primario (primary)', 'medium', 'backgroundColor', 'a.primary.cta')
+      ],
+      cssVariables: [],
+      totalUniqueColors: 4
+    }
+  }));
+  const colorTable = markdown.split('### Colores detectados por frecuencia')[1].split('### Tipografía detectada')[0];
+  const guidance = markdown.split('## Guía de implementación')[1].split('## Métricas recomendadas')[0];
+
+  assert.doesNotMatch(colorTable, /\#0d0d0d\s*\|\s*\d+\s*\|\s*(warning|aviso)/i);
+  assert.doesNotMatch(colorTable, /\#ffffff\s*\|\s*\d+\s*\|\s*(warning|aviso)/i);
+  assert.doesNotMatch(colorTable, /\#000000\s*\|\s*\d+\s*\|\s*(primary|primario)/i);
+  assert.match(colorTable, /\#0d0d0d\s*\|\s*2892\s*\|\s*texto \(text\)/);
+  assert.match(colorTable, /\#000000\s*\|\s*120\s*\|\s*sombra \(shadow\)/);
+  assert.match(colorTable, /\#e60000\s*\|\s*201\s*\|\s*primario \(primary\)/);
+  assert.match(guidance, /texto \(text\): #0d0d0d/);
+  assert.match(guidance, /primario \(primary\): #e60000/);
+  assert.doesNotMatch(guidance, /#0d0d0d \(warning|#ffffff \(warning|#000000 \(primary/i);
+});
+
 test('github issue export flags snapshot only mode without conversion recommendations', () => {
   const markdown = buildGithubIssueExport(createSnapshot({
     pageClassification: {
@@ -256,5 +283,23 @@ function createSnapshot(overrides = {}) {
       sections: []
     },
     ...overrides
+  };
+}
+
+function colorToken(value, count, role, displayRole, confidence, property, selector) {
+  return {
+    value,
+    count,
+    suggestedRole: role,
+    displayRole,
+    roleConfidence: confidence,
+    roleReason: `Propiedad CSS ${property} clasificada por el clasificador conservador.`,
+    roleSource: property === 'backgroundColor' ? 'cta_context' : 'base_css_property',
+    sample: {
+      selector,
+      property,
+      context: { region: 'main', isSystemOrHidden: false }
+    },
+    usages: [{ selector, property, region: 'main', isSystemOrHidden: false }]
   };
 }

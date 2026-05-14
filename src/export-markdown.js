@@ -158,7 +158,7 @@ export function buildGithubIssueExport(input = {}) {
   const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping: Object.values(report.behavioralMapping || {}) });
   const reviewTasks = report.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping: Object.values(report.behavioralMapping || {}) });
   const groups = groupFindings(findings);
-  const weakBlocks = Object.values(report.behavioralMapping || {}).filter(block => block.present === 'no' || block.quality <= 2);
+  const blockCategories = categorizeBehavioralBlocks(Object.values(report.behavioralMapping || {}));
   const title = `[Contextic] Revisar hallazgos ${pageClassification.archetype || 'unknown'} para ${report.screenSummary?.pageTitle || 'página sin título'}`;
 
 return `# ${title}
@@ -173,7 +173,8 @@ ${pageClassification.analysisMode === 'snapshot_only' ? '- Nota: el modo de aná
 
 ## Resumen
 - Fricciones UX: ${groups.ux.length}
-- Bloques a revisar: ${weakBlocks.length}${weakBlocks.length ? ` (${weakBlocks.map(block => blockLabel(block)).join(', ')})` : ''}
+- Bloques débiles: ${blockCategories.bloques_debiles.length}${blockCategories.bloques_debiles.length ? ` (${blockCategories.bloques_debiles.map(block => blockLabel(block)).join(', ')})` : ''}
+- Señales de revisión ligera: ${blockCategories.señales_revision_ligera.length}${blockCategories.señales_revision_ligera.length ? ` (${blockCategories.señales_revision_ligera.map(block => block.displayLabel || behavioralBlockDisplayLabel(block.block)).join(', ')})` : ''}
 - Riesgos DS: ${groups.designSystem.length}
 - Elementos de revisión manual: ${groups.manualReview.length + findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review').length}
 
@@ -217,7 +218,11 @@ export function buildTokensSnapshot(snapshot) {
     colores: colors.colors.map(color => ({
       valor: color.value,
       recuento: color.count,
-      rolSugerido: color.suggestedRole
+      rolSugerido: color.suggestedRole,
+      displayRole: color.displayRole || displayRoleForColor(color.suggestedRole),
+      confianzaRol: color.roleConfidence || 'unknown',
+      razonRol: color.roleReason || '',
+      fuenteRol: color.roleSource || 'fallback'
     })),
     tipografia: typography.typeStyles.map(item => ({ valor: item.value, recuento: item.count })),
     espaciado: spacing.spacingScale.map(item => ({ valor: item.value, recuento: item.count })),
@@ -258,7 +263,7 @@ function buildColorRows(colors = {}) {
     const observedUse = color.sample ? `${color.sample.property} en ${color.sample.selector}` : 'desconocido';
     const confidence = color.roleConfidence || roleConfidenceFromName(color.suggestedRole);
     const reason = color.roleReason || (confidence === 'low' || confidence === 'unknown' ? 'Confianza baja: evidencia contextual insuficiente.' : 'Rol inferido desde el uso del color.');
-    return `| ${color.value} | ${color.count} | ${color.suggestedRole || 'unknown'} | ${confidence} | ${escapePipes(observedUse)} | ${escapePipes(translateRoleReason(reason))} |`;
+    return `| ${color.value} | ${color.count} | ${color.displayRole || displayRoleForColor(color.suggestedRole)} | ${confidence} | ${escapePipes(observedUse)} | ${escapePipes(translateRoleReason(reason))} |`;
   });
 
   return rows.join('\n') || '| unknown | 0 | unknown | unknown | Sin evidencia de color detectada | Confianza baja: sin contexto de uso. |';
@@ -388,7 +393,7 @@ function recommendedColorSummary(colors = []) {
   return orderedRoles
     .map(roleName => {
       const values = Array.from(new Set(byRole.get(roleName) || [])).slice(0, roleName === 'text' || roleName === 'border' ? 2 : 1);
-      return values.length ? `${roleName}: ${values.join(', ')}` : '';
+      return values.length ? `${displayRoleForColor(roleName)}: ${values.join(', ')}` : '';
     })
     .filter(Boolean)
     .join('; ');
@@ -466,13 +471,29 @@ function buildBehavioralAssessment({ fullBehavioral, behavioralMapping = [], pag
 |---|---|---|---:|---|---|---|---:|
 ${behavioralMapping.map(formatBehavioralAssessmentRow).join('\n')}
 
-### Bloques a revisar
-${buildWeakBlockList(behavioralMapping)}`;
+### Bloques débiles
+${buildWeakBlockList(behavioralMapping)}
+
+### Señales de revisión ligera
+${buildLightReviewSignalList(behavioralMapping)}`;
 }
 
 function buildWeakBlockList(behavioralMapping = []) {
   const weak = getWeakBlocks(behavioralMapping).map(block => `- ${blockLabel(block)}: ${block.missing?.[0] || block.detectedFriction || 'Validar manualmente con evidencia de producto.'}`);
   return weak.join('\n') || '- No se detectan bloques débiles.';
+}
+
+function buildLightReviewSignalList(behavioralMapping = []) {
+  const signals = categorizeBehavioralBlocks(behavioralMapping).señales_revision_ligera
+    .map(block => `- ${block.displayLabel || behavioralBlockDisplayLabel(block.block)}: ${lightReviewNote(block)}`);
+  return signals.join('\n') || '- No se detectan señales de revisión ligera.';
+}
+
+function lightReviewNote(block = {}) {
+  const primary = block.diagnostics?.ctaAssessment?.primary;
+  const cleanLabel = (primary?.cleanLabel || primary?.label || '').trim();
+  if (block.block === 'where' && cleanLabel) return `Validar si el CTA principal “${cleanLabel}” coincide con el objetivo real de la página.`;
+  return block.missing?.[0] || block.detectedFriction || 'Validar la señal con evidencia de producto/diseño.';
 }
 
 function getWeakBlocks(behavioralMapping = []) {
@@ -728,6 +749,26 @@ function translateRoleReason(reason = '') {
     .replace('Neutral or white background maps to surface.', 'Un fondo neutro o blanco se mapea a surface.')
     .replace('Saturated background without CTA evidence maps to accent.', 'Un fondo saturado sin evidencia de CTA se mapea a accent.')
     .replace('Insufficient CSS property evidence for a semantic role.', 'Evidencia insuficiente de propiedad CSS para un rol semántico.');
+}
+
+function displayRoleForColor(role = 'unknown') {
+  return {
+    text: 'texto (text)',
+    surface: 'superficie (surface)',
+    brand: 'marca (brand)',
+    primary: 'primario (primary)',
+    secondary: 'secundario (secondary)',
+    accent: 'acento (accent)',
+    border: 'borde (border)',
+    focus: 'foco (focus)',
+    shadow: 'sombra (shadow)',
+    error: 'error (error)',
+    success: 'éxito (success)',
+    warning: 'aviso (warning)',
+    info: 'info (info)',
+    utility: 'utilidad (utility)',
+    unknown: 'desconocido (unknown)'
+  }[role] || 'desconocido (unknown)';
 }
 
 function translateUsageStatus(status = '') {

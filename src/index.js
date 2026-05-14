@@ -473,6 +473,7 @@ function renderPanel(snapshot) {
   }, ['×']);
 
   const weakBlocksCount = snapshot.behavioralMapping.filter(block => block.present === 'no' || block.quality <= 2).length;
+  const lightReviewCount = snapshot.behavioralMapping.filter(isLightBehavioralReviewSignal).length;
   const classification = snapshot.pageClassification || {};
   const findings = snapshot.findings || [];
   const findingGroups = groupFindings(findings);
@@ -503,7 +504,8 @@ function renderPanel(snapshot) {
 
   const grid = element('div', { class: 'grid' }, [
     metric('Fricciones UX', uxFrictionCount),
-    metric('Bloques a revisar', weakBlocksCount),
+    metric('Bloques débiles', weakBlocksCount),
+    metric('Revisión ligera', lightReviewCount),
     metric('Riesgos DS', dsRiskCount),
     metric('Revisión manual', manualReviewCount)
   ]);
@@ -693,6 +695,7 @@ function topFindingsByType(groups = {}, findings = []) {
 }
 
 function displayColorRole(color = {}) {
+  if (color.displayRole) return color.displayRole;
   const role = color.suggestedRole || 'unknown';
   const confidence = color.roleConfidence || 'low';
   if (confidence === 'low') {
@@ -700,6 +703,13 @@ function displayColorRole(color = {}) {
     if (role !== 'unknown') return `${role}?`;
   }
   return role;
+}
+
+function isLightBehavioralReviewSignal(block = {}) {
+  if (block.present === 'no' || Number(block.quality || 0) <= 2) return false;
+  if (Number(block.quality || 0) >= 4 && block.confidence === 'high' && !(block.missing || []).length && !block.detectedFriction) return false;
+  const hasConcreteNote = Boolean((block.missing || []).filter(Boolean).length || block.detectedFriction || block.diagnostics?.ctaAssessment?.primary);
+  return hasConcreteNote && (Number(block.quality || 0) === 3 || block.confidence === 'medium');
 }
 
 function severityClass(severity = '') {

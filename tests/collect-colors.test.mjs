@@ -85,8 +85,11 @@ test('neutral text color on visible div is inferred as text', () => {
 
   assert.ok(black);
   assert.equal(black.suggestedRole, 'text');
+  assert.equal(black.displayRole, 'texto (text)');
+  assert.equal(black.roleSource, 'base_css_property');
   assert.ok(['high', 'medium'].includes(black.roleConfidence));
-  assert.match(black.roleReason, /CSS property: color maps to text/i);
+  assert.match(black.roleReason, /color mapea a texto/i);
+  assert.doesNotMatch(black.roleReason, /Semantic state overrides/i);
 });
 
 test('white in skip link remains text or utility, never warning', () => {
@@ -103,6 +106,8 @@ test('white in skip link remains text or utility, never warning', () => {
   const white = result.systemHiddenVisualNoise.find(color => color.value === '#ffffff');
 
   assert.ok(white);
+  assert.ok(['utility', 'text'].includes(white.suggestedRole));
+  assert.notEqual(white.suggestedRole, 'warning');
   assert.equal(result.colors.some(color => color.value === '#ffffff'), false);
   assert.equal(white.usages[0].isSystemOrHidden, true);
 });
@@ -122,8 +127,9 @@ test('red Vodafone-like color on visible CTA is primary or brand, not error', ()
 
   assert.ok(red);
   assert.ok(['primary', 'brand'].includes(red.suggestedRole));
+  assert.ok(['cta_context', 'brand_context'].includes(red.roleSource));
   assert.notEqual(red.suggestedRole, 'error');
-  assert.match(red.roleReason, /CTA|main action/i);
+  assert.match(red.roleReason, /CTA|acción principal/i);
 });
 
 test('black in boxShadow is classified as shadow, not primary', () => {
@@ -141,6 +147,8 @@ test('black in boxShadow is classified as shadow, not primary', () => {
 
   assert.ok(black);
   assert.equal(black.suggestedRole, 'shadow');
+  assert.equal(black.displayRole, 'sombra (shadow)');
+  assert.equal(black.roleSource, 'base_css_property');
   assert.notEqual(black.suggestedRole, 'primary');
 });
 
@@ -200,6 +208,26 @@ test('black text inside warning component remains text, not warning', () => {
   assert.ok(black);
   assert.equal(black.suggestedRole, 'text');
   assert.notEqual(black.suggestedRole, 'warning');
+});
+
+test('explicit warning component background is classified as warning', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('div', {
+        text: 'Aviso importante',
+        className: 'warning alert',
+        role: 'alert',
+        style: { color: '#0d0d0d', backgroundColor: '#fff4cc' }
+      })
+    ])
+  ]);
+
+  const warning = collectColors(root).colors.find(color => color.value === '#fff4cc');
+
+  assert.ok(warning);
+  assert.equal(warning.suggestedRole, 'warning');
+  assert.equal(warning.displayRole, 'aviso (warning)');
+  assert.equal(warning.roleSource, 'semantic_component');
 });
 
 test('green in skip link is utility, not success', () => {
@@ -282,7 +310,7 @@ test('grey borderTopColor is classified as border', () => {
 
   assert.ok(grey);
   assert.equal(grey.suggestedRole, 'border');
-  assert.match(grey.roleReason, /border color maps to border/i);
+  assert.match(grey.roleReason, /borde mapea a borde/i);
 });
 
 test('grey header text is not inferred as info without explicit informational component', () => {

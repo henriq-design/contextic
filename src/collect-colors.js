@@ -69,23 +69,34 @@ export function collectColors(root = document.body, options = {}) {
   const colors = topFromMap(userFacingColorUsage, limit).map(item => {
     const sample = userFacingColorSamples.get(item.value) || colorSamples.get(item.value);
     const contexts = colorContexts.get(item.value) || [];
-    const role = guessColorRole(item.value, item.count, contexts, cssVariables);
+    const role = classifyColorUsage({ value: item.value, count: item.count, contexts, cssVariables });
     return {
       ...item,
       sample,
       usages: contexts.slice(0, 8),
       suggestedRole: role.role,
+      displayRole: role.displayRole,
       roleConfidence: role.confidence,
-      roleReason: role.reason
+      roleReason: role.reason,
+      roleSource: role.source
     };
   });
   const systemHiddenVisualNoise = topFromMap(systemColorUsage, 8)
     .filter(item => !userFacingColorUsage.has(item.value))
-    .map(item => ({
-      ...item,
-      sample: colorSamples.get(item.value),
-      usages: (colorContexts.get(item.value) || []).filter(context => context.isSystemOrHidden).slice(0, 4)
-    }));
+    .map(item => {
+      const contexts = colorContexts.get(item.value) || [];
+      const role = classifyColorUsage({ value: item.value, count: item.count, contexts, cssVariables });
+      return {
+        ...item,
+        sample: colorSamples.get(item.value),
+        usages: contexts.filter(context => context.isSystemOrHidden).slice(0, 4),
+        suggestedRole: role.role,
+        displayRole: role.displayRole,
+        roleConfidence: role.confidence,
+        roleReason: role.reason,
+        roleSource: role.source
+      };
+    });
 
   return {
     colors,
@@ -275,40 +286,52 @@ function looksLikeColorValue(value) {
   );
 }
 
-function guessColorRole(hex, count, contexts = [], cssVariables = []) {
+export function classifyColorUsage(colorUsage = {}) {
+  const hex = colorUsage.value || colorUsage.hex || '';
+  const count = colorUsage.count || 0;
+  const contexts = colorUsage.contexts || colorUsage.usages || [];
+  const cssVariables = colorUsage.cssVariables || [];
   const { r, g, b } = hexToRgb(hex);
   const luminance = relativeLuminance(r, g, b);
   const saturation = colorSaturation(r, g, b);
   const relevantContexts = contexts.filter(context => context.visible && context.region !== 'hidden_or_system');
   const variableHints = cssVariables.filter(variable => normalizeColor(variable.value) === hex).map(variable => variable.name.toLowerCase());
 
-  if (!relevantContexts.length) return role('utility', 'low', 'Only observed in hidden/system or utility contexts.');
+  if (!relevantContexts.length) return role('utility', 'low', 'Solo observado en contextos ocultos, de sistema o utilidad.', 'base_css_property');
 
   const baseRole = baseRoleFromCssProperty(hex, count, relevantContexts, variableHints, { luminance, saturation });
   if (baseRole.role === 'shadow') return baseRole;
+  if (baseRole.role === 'text' && (isNeutralHex(hex) || luminance > 0.92) && !hasExplicitSemanticToken(variableHints)) return baseRole;
 
   const semanticRole = semanticRoleFromContexts(hex, relevantContexts, { saturation, luminance, baseRole: baseRole.role, variableHints });
   if (semanticRole.role !== 'none') {
     const confidence = semanticRole.role === 'info' ? 'medium' : 'high';
-    return role(semanticRole.role, confidence, `${semanticRole.reason} Semantic state overrides base CSS role "${baseRole.role}".`);
+    return role(semanticRole.role, confidence, semanticRole.reason, 'semantic_component');
   }
 
   if (variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) && isActionColor(relevantContexts)) {
-    return role('primary', 'high', 'Brand/primary variable used on visible main action.');
+    return role('primary', 'high', 'Variable brand/primary usada en una acción principal visible.', 'cta_context');
   }
-  if (variableHints.some(name => /\b(brand)\b/.test(name))) return role('brand', 'medium', 'Color is exposed through a brand CSS variable.');
+  if (variableHints.some(name => /\b(brand)\b/.test(name))) return role('brand', 'medium', 'Color expuesto mediante una variable CSS de marca.', 'brand_context');
 
   if (isActionColor(relevantContexts)) {
-    return role('primary', 'medium', 'Used as background color on visible CTA button or main action.');
+    return role('primary', 'medium', 'Usado como backgroundColor en un CTA o acción principal visible.', 'cta_context');
   }
-  if (relevantContexts.some(context => context.componentType === 'brand_asset')) return role('brand', 'medium', 'Used in visible logo or brand asset context.');
+  if (relevantContexts.some(context => context.componentType === 'brand_asset')) return role('brand', 'medium', 'Usado en logo o asset de marca visible.', 'brand_context');
 
-  if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'Role inferred from CSS variable name and visible usage.');
+  if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'Rol inferido desde variable CSS y uso visible.', 'brand_context');
   return baseRole;
 }
 
-function role(roleName, confidence, reason) {
-  return { role: COLOR_ROLES.has(roleName) ? roleName : 'unknown', confidence, reason };
+function role(roleName, confidence, reason, source = 'fallback') {
+  const normalizedRole = COLOR_ROLES.has(roleName) ? roleName : 'unknown';
+  return {
+    role: normalizedRole,
+    displayRole: displayRoleFor(normalizedRole),
+    confidence,
+    reason,
+    source
+  };
 }
 
 function baseRoleFromCssProperty(hex, count, contexts, variableHints, metrics) {
@@ -318,29 +341,29 @@ function baseRoleFromCssProperty(hex, count, contexts, variableHints, metrics) {
 
   if (hasProperty(property => property === 'color')) {
     const confidence = count > 1 ? 'high' : 'medium';
-    return role('text', confidence, 'Base role from CSS property: color maps to text; no strong semantic state evidence found.');
+    return role('text', confidence, 'Propiedad CSS color mapea a texto; sin evidencia semántica fuerte localizada.', 'base_css_property');
   }
   if (hasProperty(property => property.includes('border'))) {
-    return role('border', saturation < 0.25 ? 'medium' : 'low', 'Base role from CSS property: border color maps to border.');
+    return role('border', saturation < 0.25 ? 'medium' : 'low', 'Propiedad CSS de borde mapea a borde.', 'base_css_property');
   }
   if (hasProperty(property => property === 'outline' || property === 'outlinecolor')) {
-    return role('focus', 'medium', 'Base role from CSS property: outline/outlineColor maps to focus.');
+    return role('focus', 'medium', 'Propiedad CSS outline/outlineColor mapea a foco.', 'base_css_property');
   }
   if (hasProperty(property => property === 'boxshadow' || property === 'textshadow')) {
-    return role('shadow', 'medium', 'Base role from CSS property: boxShadow/textShadow maps to shadow.');
+    return role('shadow', 'medium', 'Propiedad CSS boxShadow/textShadow mapea a sombra.', 'base_css_property');
   }
   if (hasProperty(property => property === 'backgroundcolor')) {
     if (variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) && isActionColor(contexts)) {
-      return role('primary', 'high', 'Base role from background color on primary/brand variable used in CTA.');
+      return role('primary', 'high', 'BackgroundColor de variable primary/brand usado en CTA.', 'cta_context');
     }
-    if (isActionColor(contexts)) return role('primary', 'medium', 'Base role from CSS property: background color on visible CTA maps to primary.');
-    if (variableHints.some(name => /\b(brand)\b/.test(name))) return role('brand', 'medium', 'Base role from CSS variable name: brand background color.');
-    if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'Base role from CSS variable name and background usage.');
-    if (luminance > 0.92 || isNeutralHex(hex)) return role('surface', 'medium', 'Base role from CSS property: neutral/light background color maps to surface.');
-    if (saturation > 0.35) return role('accent', 'low', 'Base role from CSS property: saturated background without semantic state evidence maps to accent.');
-    return role('unknown', 'low', 'Base role from CSS property: background color without action, brand, accent or surface evidence remains unknown.');
+    if (isActionColor(contexts)) return role('primary', 'medium', 'BackgroundColor en CTA visible mapea a primario.', 'cta_context');
+    if (variableHints.some(name => /\b(brand)\b/.test(name))) return role('brand', 'medium', 'BackgroundColor con variable CSS de marca.', 'brand_context');
+    if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'BackgroundColor inferido desde variable CSS.', 'brand_context');
+    if (luminance > 0.92 || isNeutralHex(hex)) return role('surface', 'medium', 'BackgroundColor neutro/claro mapea a superficie.', 'base_css_property');
+    if (saturation > 0.35) return role('accent', 'low', 'BackgroundColor saturado sin evidencia de CTA ni estado semántico mapea a accent.', 'base_css_property');
+    return role('unknown', 'low', 'BackgroundColor sin evidencia de acción, marca, accent o superficie.', 'fallback');
   }
-  return role('unknown', 'low', 'Insufficient CSS property evidence for a semantic role.');
+  return role('unknown', 'low', 'Evidencia insuficiente de propiedad CSS para inferir rol.', 'fallback');
 }
 
 function semanticRoleFromContexts(hex, contexts, metrics = {}) {
@@ -348,21 +371,49 @@ function semanticRoleFromContexts(hex, contexts, metrics = {}) {
   const precedence = ['error', 'success', 'warning', 'info'];
   for (const semanticRole of precedence) {
     const match = semanticContexts.find(context => context.semanticContext === semanticRole && canSemanticStateOverrideBaseColor(hex, context, metrics));
-    if (match) return { role: semanticRole, reason: match.semanticReason || 'Strong semantic context evidence found.' };
+    if (match) return { role: semanticRole, reason: match.semanticReason || 'Evidencia semántica fuerte y localizada.' };
   }
   return { role: 'none', reason: '' };
+}
+
+function displayRoleFor(roleName) {
+  return {
+    text: 'texto (text)',
+    surface: 'superficie (surface)',
+    brand: 'marca (brand)',
+    primary: 'primario (primary)',
+    secondary: 'secundario (secondary)',
+    accent: 'acento (accent)',
+    border: 'borde (border)',
+    focus: 'foco (focus)',
+    shadow: 'sombra (shadow)',
+    error: 'error (error)',
+    success: 'éxito (success)',
+    warning: 'aviso (warning)',
+    info: 'info (info)',
+    utility: 'utilidad (utility)',
+    unknown: 'desconocido (unknown)'
+  }[roleName] || 'desconocido (unknown)';
 }
 
 function canSemanticStateOverrideBaseColor(hex, context, metrics = {}) {
   const property = normalizeCssProperty(context.property);
   const variableHints = metrics.variableHints || [];
-  const hasExplicitSemanticToken = variableHints.some(name => /\b(error|invalid|danger|success|warning|alert|notice|info)\b/.test(name));
+  const hasExplicitSemanticToken = hasExplicitSemanticTokenVariable(variableHints);
 
   if (property === 'boxshadow' || property === 'textshadow') return false;
   if (context.semanticContext === 'warning' && property === 'color' && !hasExplicitSemanticToken) return false;
   if (property === 'color' && isNeutralHex(hex) && !hasExplicitSemanticToken) return false;
   if (property === 'backgroundcolor' || property.includes('border') || property === 'outlinecolor') return true;
   return Number(metrics.saturation || 0) >= 0.28 && Number(metrics.luminance || 0) < 0.92;
+}
+
+function hasExplicitSemanticToken(variableHints = []) {
+  return hasExplicitSemanticTokenVariable(variableHints);
+}
+
+function hasExplicitSemanticTokenVariable(variableHints = []) {
+  return variableHints.some(name => /\b(error|invalid|danger|success|warning|alert|notice|info)\b/.test(name));
 }
 
 function isActionColor(contexts) {
