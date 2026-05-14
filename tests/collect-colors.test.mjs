@@ -22,6 +22,8 @@ class FakeElement {
       borderBottomColor: 'transparent',
       borderLeftColor: 'transparent',
       outlineColor: 'transparent',
+      boxShadow: 'none',
+      textShadow: 'none',
       ...style
     };
     this.rect = { top: 100, width: 160, height: 44, ...rect };
@@ -124,6 +126,24 @@ test('red Vodafone-like color on visible CTA is primary or brand, not error', ()
   assert.match(red.roleReason, /CTA|main action/i);
 });
 
+test('black in boxShadow is classified as shadow, not primary', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('button', {
+        text: 'Contratar ahora',
+        className: 'primary cta',
+        style: { boxShadow: '0 8px 24px #000000', backgroundColor: '#e60000' }
+      })
+    ])
+  ]);
+
+  const black = collectColors(root).colors.find(color => color.value === '#000000');
+
+  assert.ok(black);
+  assert.equal(black.suggestedRole, 'shadow');
+  assert.notEqual(black.suggestedRole, 'primary');
+});
+
 test('red in validation message is classified as error', () => {
   const root = tree('body', {}, [
     tree('main', {}, [
@@ -161,6 +181,25 @@ test('black text in error copy remains text without color semantic override', ()
   assert.ok(black);
   assert.equal(black.suggestedRole, 'text');
   assert.notEqual(black.suggestedRole, 'error');
+});
+
+test('black text inside warning component remains text, not warning', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('div', {
+        text: 'Aviso importante',
+        className: 'warning alert',
+        role: 'alert',
+        style: { color: '#0d0d0d', backgroundColor: '#fff4cc' }
+      })
+    ])
+  ]);
+
+  const black = collectColors(root).colors.find(color => color.value === '#0d0d0d');
+
+  assert.ok(black);
+  assert.equal(black.suggestedRole, 'text');
+  assert.notEqual(black.suggestedRole, 'warning');
 });
 
 test('green in skip link is utility, not success', () => {

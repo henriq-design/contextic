@@ -23,22 +23,6 @@ export function buildFindings(snapshot = {}) {
     ...weakBlocksToReviewFindings(behavioralMapping)
   ];
 
-  if (!findings.length) {
-    findings.push(createFinding({
-      id: 'manual.no-high-confidence-frictions',
-      type: 'manual_review',
-      title: 'No hay fricciones UX de alta confianza',
-      evidence: ['Contextic no detectó fricciones heurísticas relevantes con evidencia fuerte.'],
-      affectedArea: 'screen',
-      severity: 1,
-      confidence: 'medium',
-      impact: 'low',
-      effort: 'low',
-      priority: 'Review',
-      rationale: 'Sin evidencia fuerte no se eleva ninguna recomendación a P0.'
-    }));
-  }
-
   return findings.sort(compareFindings);
 }
 

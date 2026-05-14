@@ -81,13 +81,12 @@ test('design system debt becomes review task outside design system audit mode', 
   assert.equal(reviewTasks[0].owner, 'design-system');
 });
 
-test('no high-confidence finding returns review task instead of baseline hypothesis', () => {
+test('no high-confidence finding does not create baseline review task', () => {
   const hypotheses = generateHypotheses([], landing);
   const reviewTasks = generateReviewTasks([], landing);
 
   assert.deepEqual(hypotheses, []);
-  assert.equal(reviewTasks[0].id, 'R1');
-  assert.match(reviewTasks[0].question, /acción principal|promesa|experimento/i);
+  assert.deepEqual(reviewTasks, []);
 });
 
 test('weak Where block markdown creates review task, not generic hypothesis', () => {
@@ -123,6 +122,30 @@ test('Vodafone CTA label generates specific product hypothesis', () => {
   assert.equal(hypotheses[0].metrics.primary, 'primary CTA CTR');
   assert.deepEqual(hypotheses[0].metrics.secondary, ['qualified conversion rate', 'secondary CTA clicks', 'bounce']);
   assert.deepEqual(hypotheses[0].metrics.guardrail, ['accessibility regressions']);
+});
+
+test('clean CTA label creates actionable review task without absence finding', () => {
+  const reviewTasks = generateReviewTasks([], landing, {
+    behavioralMapping: [{
+      block: 'where',
+      displayLabel: 'Dónde actuar',
+      present: 'parcial',
+      quality: 3,
+      confidence: 'medium',
+      evidence: ['CTA principal visible en main: “Asegura tu móvil”.'],
+      missing: ['Validar si el CTA expresa el objetivo real.'],
+      diagnostics: {
+        ctaAssessment: {
+          primary: { cleanLabel: 'Asegura tu móvil', region: 'main' }
+        }
+      }
+    }]
+  });
+
+  assert.equal(reviewTasks[0].question, '¿El CTA principal ‘Asegura tu móvil’ coincide con el objetivo real de la página?');
+  assert.deepEqual(reviewTasks[0].evidence, ['CTA principal visible en main: “Asegura tu móvil”.']);
+  assert.equal(reviewTasks[0].owner, 'product/design');
+  assert.doesNotMatch(JSON.stringify(reviewTasks), /No hay fricciones UX de alta confianza/);
 });
 
 test('manual low-confidence Who and How do not generate generic hypotheses', () => {
@@ -202,6 +225,58 @@ test('handoff summary deduplicates manual review items and omits empty top hypot
   assert.equal(countMatches(handoff, '[Dónde actuar / where]'), 1);
   assert.doesNotMatch(handoff, /\[(Who|How|Where)\]/);
   assert.doesNotMatch(handoff, /### (Top hypothesis|Hipótesis principal)/);
+});
+
+test('summary separates weak blocks from light review signals and excludes strong How block', () => {
+  const markdown = buildDesignContextMarkdown(createSnapshot({
+    frictions: [],
+    behavioralMapping: [
+      {
+        block: 'how',
+        displayLabel: 'Cómo',
+        present: 'sí',
+        quality: 4,
+        confidence: 'high',
+        evidence: ['Se explica el proceso principal.'],
+        missing: [],
+        detectedFriction: '',
+        severity: 0
+      },
+      {
+        block: 'who',
+        displayLabel: 'Para quién',
+        present: 'parcial',
+        quality: 3,
+        confidence: 'medium',
+        evidence: ['Target funcional detectado.'],
+        missing: ['Validar si el target funcional necesita segmento explícito.'],
+        severity: 1
+      },
+      {
+        block: 'where',
+        displayLabel: 'Dónde actuar',
+        present: 'parcial',
+        quality: 3,
+        confidence: 'medium',
+        evidence: ['CTA principal visible en main: “Asegura tu móvil”.'],
+        missing: ['Validar objetivo real del CTA.'],
+        severity: 1,
+        diagnostics: {
+          ctaAssessment: {
+            primary: { cleanLabel: 'Asegura tu móvil', region: 'main' }
+          }
+        }
+      }
+    ]
+  }));
+  const summary = markdown.split('## Resumen ejecutivo')[1].split('## Snapshot de sistema de diseño')[0];
+  const handoff = markdown.split('## Handoff summary')[1];
+
+  assert.match(summary, /Bloques débiles: 0/);
+  assert.match(summary, /Señales de revisión ligera: Para quién, Dónde actuar/);
+  assert.doesNotMatch(handoff, /\[Cómo \/ how\]/);
+  assert.match(handoff, /¿El CTA principal ‘Asegura tu móvil’ coincide con el objetivo real de la página\?/);
+  assert.doesNotMatch(markdown, /No hay fricciones UX de alta confianza requiere una intervención/);
 });
 
 test('recommended metrics do not duplicate metrics between primary and secondary', () => {

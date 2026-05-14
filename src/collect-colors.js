@@ -285,7 +285,9 @@ function guessColorRole(hex, count, contexts = [], cssVariables = []) {
   if (!relevantContexts.length) return role('utility', 'low', 'Only observed in hidden/system or utility contexts.');
 
   const baseRole = baseRoleFromCssProperty(hex, count, relevantContexts, variableHints, { luminance, saturation });
-  const semanticRole = semanticRoleFromContexts(hex, relevantContexts, { saturation, luminance });
+  if (baseRole.role === 'shadow') return baseRole;
+
+  const semanticRole = semanticRoleFromContexts(hex, relevantContexts, { saturation, luminance, baseRole: baseRole.role, variableHints });
   if (semanticRole.role !== 'none') {
     const confidence = semanticRole.role === 'info' ? 'medium' : 'high';
     return role(semanticRole.role, confidence, `${semanticRole.reason} Semantic state overrides base CSS role "${baseRole.role}".`);
@@ -353,7 +355,12 @@ function semanticRoleFromContexts(hex, contexts, metrics = {}) {
 
 function canSemanticStateOverrideBaseColor(hex, context, metrics = {}) {
   const property = normalizeCssProperty(context.property);
-  if (property === 'color' && isNeutralHex(hex)) return false;
+  const variableHints = metrics.variableHints || [];
+  const hasExplicitSemanticToken = variableHints.some(name => /\b(error|invalid|danger|success|warning|alert|notice|info)\b/.test(name));
+
+  if (property === 'boxshadow' || property === 'textshadow') return false;
+  if (context.semanticContext === 'warning' && property === 'color' && !hasExplicitSemanticToken) return false;
+  if (property === 'color' && isNeutralHex(hex) && !hasExplicitSemanticToken) return false;
   if (property === 'backgroundcolor' || property.includes('border') || property === 'outlinecolor') return true;
   return Number(metrics.saturation || 0) >= 0.28 && Number(metrics.luminance || 0) < 0.92;
 }

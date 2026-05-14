@@ -25,12 +25,11 @@ export function generateReviewTasks(findings = [], pageClassification = {}, cont
   for (const block of context.behavioralMapping || []) {
     if (!['who', 'how', 'where', 'when'].includes(block.block)) continue;
     if (actionableHypothesisAreas.has(block.block)) continue;
-    if (block.present === 'sí' && block.quality >= 4 && !(block.missing || []).length) continue;
+    if (!isWeakBlock(block) && !isLightReviewSignal(block)) continue;
     tasks.push(blockToReviewTask(block));
   }
 
-  if (!tasks.length) tasks.push(baselineReviewTask(pageClassification));
-  return dedupeTasks(tasks).slice(0, 6).map((task, index) => ({ id: `R${index + 1}`, ...task }));
+  return dedupeTasks(tasks).sort(compareReviewTasks).slice(0, 6).map((task, index) => ({ id: `R${index + 1}`, ...task }));
 }
 
 function shouldCreateHypothesis(finding, pageClassification = {}) {
@@ -88,17 +87,6 @@ function hypothesesFromBehavioralMapping(behavioralMapping = [], pageClassificat
   }];
 }
 
-function baselineReviewTask(pageClassification) {
-  const archetype = pageClassification.archetype || 'unknown';
-  return {
-    question: `¿La página ${archetype} tiene una acción principal, audiencia y promesa suficientemente claras para proponer un experimento?`,
-    evidence: ['No hay hipótesis accionables con evidencia, cambio propuesto y métrica clara.'],
-    whyItMatters: 'Evita convertir señales débiles en recomendaciones de producto prematuras.',
-    howToValidate: 'Revisar CTA principal, jerarquía, audiencia, copy post-CTA y eventos de analítica antes de diseñar variantes.',
-    owner: 'product'
-  };
-}
-
 function hypothesisTitle(finding, isDesignSystem) {
   if (isDesignSystem) return `Hipótesis de sistema: ${finding.title}`;
   if (finding.affectedArea === 'where' || /cta/i.test(finding.title)) return `Clarificar el CTA principal: ${finding.title}`;
@@ -139,6 +127,10 @@ function findingToReviewTask(finding) {
 }
 
 function blockToReviewTask(block) {
+  const primary = block.diagnostics?.ctaAssessment?.primary;
+  const cleanLabel = primary?.cleanLabel || primary?.label;
+  if (block.block === 'where' && cleanLabel) return ctaReviewTask(block, cleanLabel, primary);
+
   return {
     question: reviewQuestionForBlock(block),
     evidence: [...(block.evidence || []), ...(block.missing || [])].filter(Boolean),
@@ -146,6 +138,28 @@ function blockToReviewTask(block) {
     howToValidate: reviewValidationForBlock(block),
     owner: reviewOwnerForBlock(block)
   };
+}
+
+function ctaReviewTask(block, cleanLabel, primary = {}) {
+  const region = primary.region || 'main';
+  return {
+    question: `¿El CTA principal ‘${cleanLabel}’ coincide con el objetivo real de la página?`,
+    evidence: [`CTA principal visible en ${region}: “${cleanLabel}”.`],
+    whyItMatters: 'Si el objetivo es contratación, captación o autogestión, el CTA debe prometer exactamente esa progresión.',
+    howToValidate: 'Revisar destino del CTA, eventos de clic, objetivo de campaña y conversión posterior.',
+    owner: 'product/design'
+  };
+}
+
+function isWeakBlock(block = {}) {
+  return block.present === 'no' || Number(block.quality || 0) <= 2;
+}
+
+function isLightReviewSignal(block = {}) {
+  if (isWeakBlock(block)) return false;
+  if (Number(block.quality || 0) >= 4 && block.confidence === 'high' && !(block.missing || []).length && !block.detectedFriction) return false;
+  const hasConcreteNote = Boolean((block.missing || []).filter(Boolean).length || block.detectedFriction || block.diagnostics?.ctaAssessment?.primary);
+  return hasConcreteNote && (Number(block.quality || 0) === 3 || block.confidence === 'medium');
 }
 
 function reviewQuestionForFinding(finding) {
@@ -219,6 +233,19 @@ function dedupeTasks(tasks) {
     seen.add(key);
     return true;
   });
+}
+
+function compareReviewTasks(a = {}, b = {}) {
+  return reviewTaskPriority(a) - reviewTaskPriority(b);
+}
+
+function reviewTaskPriority(task = {}) {
+  const text = `${task.question || ''} ${(task.evidence || []).join(' ')}`.toLowerCase();
+  if (/cta principal|asegura tu m[oó]vil|objetivo real de la p[aá]gina/.test(text)) return 0;
+  if (/cta|d[oó]nde actuar|jerarqu/.test(text)) return 1;
+  if (/target|audiencia|para qui[eé]n/.test(text)) return 2;
+  if (/proceso|despu[eé]s|c[oó]mo/.test(text)) return 3;
+  return 4;
 }
 
 function becauseText(finding) {

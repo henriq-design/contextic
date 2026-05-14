@@ -340,7 +340,7 @@ function buildImplementationGuidance(snapshot = {}) {
   const typography = snapshot.typography || {};
   const dominantSpacing = (spacing.spacingScale || []).slice(0, 5).map(item => item.value).join(', ');
   const dominantRadius = (spacing.radii || [])[0]?.value;
-  const recurrentColors = (colors.colors || []).slice(0, 6).map(color => `${color.value} (${color.suggestedRole || 'unknown'})`).join(', ');
+  const recurrentColors = recommendedColorSummary(colors.colors || []);
   const fontFamilies = (typography.fontFamilies || []).slice(0, 3).map(item => item.value).join(', ');
   const guidance = [];
 
@@ -369,6 +369,35 @@ function buildImplementationGuidance(snapshot = {}) {
   }
 
   return guidance;
+}
+
+function recommendedColorSummary(colors = []) {
+  const allowedRoles = ['text', 'primary', 'brand', 'border', 'surface'];
+  const byRole = new Map();
+
+  for (const color of colors) {
+    const roleName = color.suggestedRole || 'unknown';
+    if (!allowedRoles.includes(roleName)) continue;
+    if (color.roleConfidence === 'low') continue;
+    if (isUtilityOrSystemColor(color)) continue;
+    if (!byRole.has(roleName)) byRole.set(roleName, []);
+    byRole.get(roleName).push(color.value);
+  }
+
+  const orderedRoles = ['text', 'primary', 'brand', 'border', 'surface'];
+  return orderedRoles
+    .map(roleName => {
+      const values = Array.from(new Set(byRole.get(roleName) || [])).slice(0, roleName === 'text' || roleName === 'border' ? 2 : 1);
+      return values.length ? `${roleName}: ${values.join(', ')}` : '';
+    })
+    .filter(Boolean)
+    .join('; ');
+}
+
+function isUtilityOrSystemColor(color = {}) {
+  const sample = color.sample?.context || color.sample || {};
+  const usages = color.usages || [];
+  return sample.isSystemOrHidden || sample.region === 'hidden_or_system' || usages.every(usage => usage.isSystemOrHidden || usage.region === 'hidden_or_system');
 }
 
 function behavioralScopeNote(pageClassification = {}) {
@@ -401,7 +430,7 @@ function buildScopeExclusionList(exclusions = []) {
 
 function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses = [], reviewTasks = [], behavioralMapping = [], pageClassification = {} }) {
   const highConfidenceRisks = findings.filter(finding => finding.confidence === 'high' && ['P0', 'P1'].includes(finding.priority));
-  const weakBlocks = getWeakBlocks(behavioralMapping);
+  const blockCategories = categorizeBehavioralBlocks(behavioralMapping);
   const topProductHypothesis = hypotheses.find(hypothesis => !isSystemHypothesis(hypothesis));
   const topSystemHypothesis = hypotheses.find(isSystemHypothesis);
   const lines = [
@@ -410,9 +439,8 @@ function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses =
     highConfidenceRisks.length
       ? `- Riesgos UX de alta confianza: ${highConfidenceRisks.map(finding => finding.title).slice(0, 3).join('; ')}.`
       : '- No se detectan fricciones UX de alta confianza.',
-    weakBlocks.length
-      ? `- Bloques behavioral para revisión manual: ${weakBlocks.map(block => blockLabel(block)).join(', ')}.`
-      : '- No se detectan bloques behavioral débiles con la heurística actual.',
+    `- Bloques débiles: ${blockCategories.bloques_debiles.length}${blockCategories.bloques_debiles.length ? ` (${blockCategories.bloques_debiles.map(block => blockLabel(block)).join(', ')})` : ''}.`,
+    `- Señales de revisión ligera: ${blockCategories.señales_revision_ligera.length ? blockCategories.señales_revision_ligera.map(block => block.displayLabel || behavioralBlockDisplayLabel(block.block)).join(', ') : '0'}.`,
     topProductHypothesis
       ? `- Hipótesis principal: ${topProductHypothesis.id} ${topProductHypothesis.title}; métrica primaria: ${topProductHypothesis.metrics.primary}.`
       : topSystemHypothesis && pageClassification.analysisMode === 'design_system_audit'
@@ -484,7 +512,7 @@ function formatFinding(finding) {
 }
 
 function buildHypothesisCards(hypotheses = []) {
-  if (!hypotheses.length) return '- No se generaron hipótesis accionables. Revisa la sección “Tareas de revisión”.';
+  if (!hypotheses.length) return '- No se generaron hipótesis accionables. Revisa las tareas de validación si existen.';
   return hypotheses.map(formatHypothesisCard).join('\n\n');
 }
 
@@ -503,7 +531,7 @@ function formatHypothesisCard(hypothesis) {
 }
 
 function buildReviewTasks(tasks = []) {
-  if (!tasks.length) return '- No hay tareas de revisión.';
+  if (!tasks.length) return '- No hay tareas de revisión prioritarias con la evidencia actual.';
   return tasks.map(task => `### ${task.id}: ${task.question}
 - Pregunta: ${task.question}
 - Evidencia: ${(task.evidence || []).map(escapePipes).join('; ') || 'Sin evidencia automática fuerte.'}
@@ -938,7 +966,7 @@ function buildHighConfidenceRisks(findings = []) {
 
 function buildManualReviewSummary(reviewTasks = []) {
   const items = uniqueReviewTasks(reviewTasks).map(task => `- [${reviewTaskTag(task)}] ${reviewTaskSummary(task)}`);
-  return items.join('\n') || '- No hay elementos de revisión manual más allá del QA normal.';
+  return items.join('\n') || '- No hay señales de revisión ligera con la evidencia actual.';
 }
 
 function buildDesignSystemDebtSummary(findings = []) {
@@ -1003,6 +1031,25 @@ function reviewTaskSummary(task = {}) {
   if (tag === 'Dónde actuar / where') return 'Validar si el CTA principal responde al objetivo de negocio.';
   if (tag === 'Cuándo / when') return 'Validar si existe urgencia real o solo límites de valor/cobertura.';
   return question || 'Validar la señal antes de proponer cambios.';
+}
+
+function categorizeBehavioralBlocks(behavioralMapping = []) {
+  return {
+    bloques_debiles: behavioralMapping.filter(isWeakBehavioralBlock),
+    señales_revision_ligera: behavioralMapping.filter(isLightBehavioralReviewSignal),
+    bloques_fuertes: behavioralMapping.filter(block => !isWeakBehavioralBlock(block) && !isLightBehavioralReviewSignal(block))
+  };
+}
+
+function isWeakBehavioralBlock(block = {}) {
+  return block.present === 'no' || Number(block.quality || 0) <= 2;
+}
+
+function isLightBehavioralReviewSignal(block = {}) {
+  if (isWeakBehavioralBlock(block)) return false;
+  if (Number(block.quality || 0) >= 4 && block.confidence === 'high' && !(block.missing || []).length && !block.detectedFriction) return false;
+  const hasConcreteNote = Boolean((block.missing || []).filter(Boolean).length || block.detectedFriction || block.diagnostics?.ctaAssessment?.primary);
+  return hasConcreteNote && (Number(block.quality || 0) === 3 || block.confidence === 'medium');
 }
 
 function isSystemHypothesis(hypothesis = {}) {

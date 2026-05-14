@@ -126,7 +126,8 @@ test('github issue export stays conservative when evidence is missing', () => {
 
   assert.match(markdown, /Revisar hallazgos unknown para página sin título/);
   assert.match(markdown, /snapshot_only; no se generan recomendaciones de conversión/);
-  assert.match(markdown, /No hay fricciones UX de alta confianza/);
+  assert.match(markdown, /Fricciones UX: 0/);
+  assert.doesNotMatch(markdown, /No hay fricciones UX de alta confianza requiere una intervención/);
   assert.doesNotMatch(markdown, /undefined|NaN/);
   assert.doesNotMatch(markdown, /0 button\/CTA candidate/);
   assert.doesNotMatch(markdown, /0 unique color/);

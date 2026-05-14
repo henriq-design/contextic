@@ -1094,7 +1094,9 @@ function guessColorRole(hex, count, contexts = [], cssVariables = []) {
   if (!relevantContexts.length) return role('utility', 'low', 'Only observed in hidden/system or utility contexts.');
 
   const baseRole = baseRoleFromCssProperty(hex, count, relevantContexts, variableHints, { luminance, saturation });
-  const semanticRole = semanticRoleFromContexts(hex, relevantContexts, { saturation, luminance });
+  if (baseRole.role === 'shadow') return baseRole;
+
+  const semanticRole = semanticRoleFromContexts(hex, relevantContexts, { saturation, luminance, baseRole: baseRole.role, variableHints });
   if (semanticRole.role !== 'none') {
     const confidence = semanticRole.role === 'info' ? 'medium' : 'high';
     return role(semanticRole.role, confidence, `${semanticRole.reason} Semantic state overrides base CSS role "${baseRole.role}".`);
@@ -1162,7 +1164,12 @@ function semanticRoleFromContexts(hex, contexts, metrics = {}) {
 
 function canSemanticStateOverrideBaseColor(hex, context, metrics = {}) {
   const property = normalizeCssProperty(context.property);
-  if (property === 'color' && isNeutralHex(hex)) return false;
+  const variableHints = metrics.variableHints || [];
+  const hasExplicitSemanticToken = variableHints.some(name => /\b(error|invalid|danger|success|warning|alert|notice|info)\b/.test(name));
+
+  if (property === 'boxshadow' || property === 'textshadow') return false;
+  if (context.semanticContext === 'warning' && property === 'color' && !hasExplicitSemanticToken) return false;
+  if (property === 'color' && isNeutralHex(hex) && !hasExplicitSemanticToken) return false;
   if (property === 'backgroundcolor' || property.includes('border') || property === 'outlinecolor') return true;
   return Number(metrics.saturation || 0) >= 0.28 && Number(metrics.luminance || 0) < 0.92;
 }
@@ -2045,22 +2052,6 @@ function buildFindings(snapshot = {}) {
     ...weakBlocksToReviewFindings(behavioralMapping)
   ];
 
-  if (!findings.length) {
-    findings.push(createFinding({
-      id: 'manual.no-high-confidence-frictions',
-      type: 'manual_review',
-      title: 'No hay fricciones UX de alta confianza',
-      evidence: ['Contextic no detectó fricciones heurísticas relevantes con evidencia fuerte.'],
-      affectedArea: 'screen',
-      severity: 1,
-      confidence: 'medium',
-      impact: 'low',
-      effort: 'low',
-      priority: 'Review',
-      rationale: 'Sin evidencia fuerte no se eleva ninguna recomendación a P0.'
-    }));
-  }
-
   return findings.sort(compareFindings);
 }
 
@@ -2259,12 +2250,11 @@ function generateReviewTasks(findings = [], pageClassification = {}, context = {
   for (const block of context.behavioralMapping || []) {
     if (!['who', 'how', 'where', 'when'].includes(block.block)) continue;
     if (actionableHypothesisAreas.has(block.block)) continue;
-    if (block.present === 'sí' && block.quality >= 4 && !(block.missing || []).length) continue;
+    if (!isWeakBlock(block) && !isLightReviewSignal(block)) continue;
     tasks.push(blockToReviewTask(block));
   }
 
-  if (!tasks.length) tasks.push(baselineReviewTask(pageClassification));
-  return dedupeTasks(tasks).slice(0, 6).map((task, index) => ({ id: `R${index + 1}`, ...task }));
+  return dedupeTasks(tasks).sort(compareReviewTasks).slice(0, 6).map((task, index) => ({ id: `R${index + 1}`, ...task }));
 }
 
 function shouldCreateHypothesis(finding, pageClassification = {}) {
@@ -2322,17 +2312,6 @@ function hypothesesFromBehavioralMapping(behavioralMapping = [], pageClassificat
   }];
 }
 
-function baselineReviewTask(pageClassification) {
-  const archetype = pageClassification.archetype || 'unknown';
-  return {
-    question: `¿La página ${archetype} tiene una acción principal, audiencia y promesa suficientemente claras para proponer un experimento?`,
-    evidence: ['No hay hipótesis accionables con evidencia, cambio propuesto y métrica clara.'],
-    whyItMatters: 'Evita convertir señales débiles en recomendaciones de producto prematuras.',
-    howToValidate: 'Revisar CTA principal, jerarquía, audiencia, copy post-CTA y eventos de analítica antes de diseñar variantes.',
-    owner: 'product'
-  };
-}
-
 function hypothesisTitle(finding, isDesignSystem) {
   if (isDesignSystem) return `Hipótesis de sistema: ${finding.title}`;
   if (finding.affectedArea === 'where' || /cta/i.test(finding.title)) return `Clarificar el CTA principal: ${finding.title}`;
@@ -2373,6 +2352,10 @@ function findingToReviewTask(finding) {
 }
 
 function blockToReviewTask(block) {
+  const primary = block.diagnostics?.ctaAssessment?.primary;
+  const cleanLabel = primary?.cleanLabel || primary?.label;
+  if (block.block === 'where' && cleanLabel) return ctaReviewTask(block, cleanLabel, primary);
+
   return {
     question: reviewQuestionForBlock(block),
     evidence: [...(block.evidence || []), ...(block.missing || [])].filter(Boolean),
@@ -2380,6 +2363,28 @@ function blockToReviewTask(block) {
     howToValidate: reviewValidationForBlock(block),
     owner: reviewOwnerForBlock(block)
   };
+}
+
+function ctaReviewTask(block, cleanLabel, primary = {}) {
+  const region = primary.region || 'main';
+  return {
+    question: `¿El CTA principal ‘${cleanLabel}’ coincide con el objetivo real de la página?`,
+    evidence: [`CTA principal visible en ${region}: “${cleanLabel}”.`],
+    whyItMatters: 'Si el objetivo es contratación, captación o autogestión, el CTA debe prometer exactamente esa progresión.',
+    howToValidate: 'Revisar destino del CTA, eventos de clic, objetivo de campaña y conversión posterior.',
+    owner: 'product/design'
+  };
+}
+
+function isWeakBlock(block = {}) {
+  return block.present === 'no' || Number(block.quality || 0) <= 2;
+}
+
+function isLightReviewSignal(block = {}) {
+  if (isWeakBlock(block)) return false;
+  if (Number(block.quality || 0) >= 4 && block.confidence === 'high' && !(block.missing || []).length && !block.detectedFriction) return false;
+  const hasConcreteNote = Boolean((block.missing || []).filter(Boolean).length || block.detectedFriction || block.diagnostics?.ctaAssessment?.primary);
+  return hasConcreteNote && (Number(block.quality || 0) === 3 || block.confidence === 'medium');
 }
 
 function reviewQuestionForFinding(finding) {
@@ -2453,6 +2458,19 @@ function dedupeTasks(tasks) {
     seen.add(key);
     return true;
   });
+}
+
+function compareReviewTasks(a = {}, b = {}) {
+  return reviewTaskPriority(a) - reviewTaskPriority(b);
+}
+
+function reviewTaskPriority(task = {}) {
+  const text = `${task.question || ''} ${(task.evidence || []).join(' ')}`.toLowerCase();
+  if (/cta principal|asegura tu m[oó]vil|objetivo real de la p[aá]gina/.test(text)) return 0;
+  if (/cta|d[oó]nde actuar|jerarqu/.test(text)) return 1;
+  if (/target|audiencia|para qui[eé]n/.test(text)) return 2;
+  if (/proceso|despu[eé]s|c[oó]mo/.test(text)) return 3;
+  return 4;
 }
 
 function becauseText(finding) {
@@ -3928,7 +3946,7 @@ function buildImplementationGuidance(snapshot = {}) {
   const typography = snapshot.typography || {};
   const dominantSpacing = (spacing.spacingScale || []).slice(0, 5).map(item => item.value).join(', ');
   const dominantRadius = (spacing.radii || [])[0]?.value;
-  const recurrentColors = (colors.colors || []).slice(0, 6).map(color => `${color.value} (${color.suggestedRole || 'unknown'})`).join(', ');
+  const recurrentColors = recommendedColorSummary(colors.colors || []);
   const fontFamilies = (typography.fontFamilies || []).slice(0, 3).map(item => item.value).join(', ');
   const guidance = [];
 
@@ -3957,6 +3975,35 @@ function buildImplementationGuidance(snapshot = {}) {
   }
 
   return guidance;
+}
+
+function recommendedColorSummary(colors = []) {
+  const allowedRoles = ['text', 'primary', 'brand', 'border', 'surface'];
+  const byRole = new Map();
+
+  for (const color of colors) {
+    const roleName = color.suggestedRole || 'unknown';
+    if (!allowedRoles.includes(roleName)) continue;
+    if (color.roleConfidence === 'low') continue;
+    if (isUtilityOrSystemColor(color)) continue;
+    if (!byRole.has(roleName)) byRole.set(roleName, []);
+    byRole.get(roleName).push(color.value);
+  }
+
+  const orderedRoles = ['text', 'primary', 'brand', 'border', 'surface'];
+  return orderedRoles
+    .map(roleName => {
+      const values = Array.from(new Set(byRole.get(roleName) || [])).slice(0, roleName === 'text' || roleName === 'border' ? 2 : 1);
+      return values.length ? `${roleName}: ${values.join(', ')}` : '';
+    })
+    .filter(Boolean)
+    .join('; ');
+}
+
+function isUtilityOrSystemColor(color = {}) {
+  const sample = color.sample?.context || color.sample || {};
+  const usages = color.usages || [];
+  return sample.isSystemOrHidden || sample.region === 'hidden_or_system' || usages.every(usage => usage.isSystemOrHidden || usage.region === 'hidden_or_system');
 }
 
 function behavioralScopeNote(pageClassification = {}) {
@@ -3989,7 +4036,7 @@ function buildScopeExclusionList(exclusions = []) {
 
 function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses = [], reviewTasks = [], behavioralMapping = [], pageClassification = {} }) {
   const highConfidenceRisks = findings.filter(finding => finding.confidence === 'high' && ['P0', 'P1'].includes(finding.priority));
-  const weakBlocks = getWeakBlocks(behavioralMapping);
+  const blockCategories = categorizeBehavioralBlocks(behavioralMapping);
   const topProductHypothesis = hypotheses.find(hypothesis => !isSystemHypothesis(hypothesis));
   const topSystemHypothesis = hypotheses.find(isSystemHypothesis);
   const lines = [
@@ -3998,9 +4045,8 @@ function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses =
     highConfidenceRisks.length
       ? `- Riesgos UX de alta confianza: ${highConfidenceRisks.map(finding => finding.title).slice(0, 3).join('; ')}.`
       : '- No se detectan fricciones UX de alta confianza.',
-    weakBlocks.length
-      ? `- Bloques behavioral para revisión manual: ${weakBlocks.map(block => blockLabel(block)).join(', ')}.`
-      : '- No se detectan bloques behavioral débiles con la heurística actual.',
+    `- Bloques débiles: ${blockCategories.bloques_debiles.length}${blockCategories.bloques_debiles.length ? ` (${blockCategories.bloques_debiles.map(block => blockLabel(block)).join(', ')})` : ''}.`,
+    `- Señales de revisión ligera: ${blockCategories.señales_revision_ligera.length ? blockCategories.señales_revision_ligera.map(block => block.displayLabel || behavioralBlockDisplayLabel(block.block)).join(', ') : '0'}.`,
     topProductHypothesis
       ? `- Hipótesis principal: ${topProductHypothesis.id} ${topProductHypothesis.title}; métrica primaria: ${topProductHypothesis.metrics.primary}.`
       : topSystemHypothesis && pageClassification.analysisMode === 'design_system_audit'
@@ -4072,7 +4118,7 @@ function formatFinding(finding) {
 }
 
 function buildHypothesisCards(hypotheses = []) {
-  if (!hypotheses.length) return '- No se generaron hipótesis accionables. Revisa la sección “Tareas de revisión”.';
+  if (!hypotheses.length) return '- No se generaron hipótesis accionables. Revisa las tareas de validación si existen.';
   return hypotheses.map(formatHypothesisCard).join('\n\n');
 }
 
@@ -4091,7 +4137,7 @@ function formatHypothesisCard(hypothesis) {
 }
 
 function buildReviewTasks(tasks = []) {
-  if (!tasks.length) return '- No hay tareas de revisión.';
+  if (!tasks.length) return '- No hay tareas de revisión prioritarias con la evidencia actual.';
   return tasks.map(task => `### ${task.id}: ${task.question}
 - Pregunta: ${task.question}
 - Evidencia: ${(task.evidence || []).map(escapePipes).join('; ') || 'Sin evidencia automática fuerte.'}
@@ -4526,7 +4572,7 @@ function buildHighConfidenceRisks(findings = []) {
 
 function buildManualReviewSummary(reviewTasks = []) {
   const items = uniqueReviewTasks(reviewTasks).map(task => `- [${reviewTaskTag(task)}] ${reviewTaskSummary(task)}`);
-  return items.join('\n') || '- No hay elementos de revisión manual más allá del QA normal.';
+  return items.join('\n') || '- No hay señales de revisión ligera con la evidencia actual.';
 }
 
 function buildDesignSystemDebtSummary(findings = []) {
@@ -4591,6 +4637,25 @@ function reviewTaskSummary(task = {}) {
   if (tag === 'Dónde actuar / where') return 'Validar si el CTA principal responde al objetivo de negocio.';
   if (tag === 'Cuándo / when') return 'Validar si existe urgencia real o solo límites de valor/cobertura.';
   return question || 'Validar la señal antes de proponer cambios.';
+}
+
+function categorizeBehavioralBlocks(behavioralMapping = []) {
+  return {
+    bloques_debiles: behavioralMapping.filter(isWeakBehavioralBlock),
+    señales_revision_ligera: behavioralMapping.filter(isLightBehavioralReviewSignal),
+    bloques_fuertes: behavioralMapping.filter(block => !isWeakBehavioralBlock(block) && !isLightBehavioralReviewSignal(block))
+  };
+}
+
+function isWeakBehavioralBlock(block = {}) {
+  return block.present === 'no' || Number(block.quality || 0) <= 2;
+}
+
+function isLightBehavioralReviewSignal(block = {}) {
+  if (isWeakBehavioralBlock(block)) return false;
+  if (Number(block.quality || 0) >= 4 && block.confidence === 'high' && !(block.missing || []).length && !block.detectedFriction) return false;
+  const hasConcreteNote = Boolean((block.missing || []).filter(Boolean).length || block.detectedFriction || block.diagnostics?.ctaAssessment?.primary);
+  return hasConcreteNote && (Number(block.quality || 0) === 3 || block.confidence === 'medium');
 }
 
 function isSystemHypothesis(hypothesis = {}) {
