@@ -68,7 +68,7 @@ test('markdown keeps weak blocks out of P0 prioritized follow-up', () => {
     behavioralMapping: [weakWhereBlock({ present: 'parcial', quality: 2 })]
   }));
 
-  assert.match(markdown, /Weak block: Where/);
+  assert.match(markdown, /Bloque a revisar: Dónde actuar \(where\)/);
   assert.match(markdown, /Review/);
   assert.doesNotMatch(markdown, /\| P0 \| Reforzar Where/);
 });
@@ -77,6 +77,7 @@ function weakWhereBlock(overrides = {}) {
   return {
     block: 'where',
     label: 'Where',
+    displayLabel: 'Dónde actuar',
     present: 'parcial',
     quality: 2,
     evidence: ['CTA detectado con baja jerarquía.'],

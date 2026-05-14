@@ -3,11 +3,11 @@ import { collectTypography } from './collect-typography.js';
 import { collectSpacing } from './collect-spacing.js';
 import { collectComponents } from './collect-components.js';
 import { detectFrictions } from './detect-frictions.js';
-import { buildBehavioralMapping, buildBehavioralStructureRecommendation } from './behavioral-model.js';
+import { behavioralBlockDisplayLabel, buildBehavioralMapping, buildBehavioralStructureRecommendation } from './behavioral-model.js';
 import { pageArchetypeClassifier, shouldRunFullBehavioralAnalysis } from './page-archetype-classifier.js';
 import { detectDomRegions } from './dom-regions.js';
 import { buildFindings, groupFindings } from './findings-prioritization.js';
-import { generateHypotheses } from './hypotheses.js';
+import { generateHypotheses, generateReviewTasks } from './hypotheses.js';
 import { buildDesignContextMarkdown, buildGithubIssueExport, buildJsonExport } from './export-markdown.js';
 
 const PANEL_ID = 'contextic-panel';
@@ -41,7 +41,8 @@ function createSnapshot() {
   const behavioralMapping = fullBehavioral ? buildBehavioralMapping({ components: behavioralComponents, frictions }, scopeMap.behavioralRoot) : [];
   const behavioralRecommendation = fullBehavioral ? buildBehavioralStructureRecommendation({ behavioralMapping, frictions }) : { sections: [] };
   const findings = buildFindings({ frictions, behavioralMapping });
-  const hypotheses = generateHypotheses(findings, pageClassification);
+  const hypotheses = generateHypotheses(findings, pageClassification, { behavioralMapping });
+  const reviewTasks = generateReviewTasks(findings, pageClassification, { behavioralMapping });
 
   return {
     meta: {
@@ -66,6 +67,7 @@ function createSnapshot() {
     frictions,
     findings,
     hypotheses,
+    reviewTasks,
     behavioralMapping,
     behavioralRecommendation
   };
@@ -473,7 +475,7 @@ function renderPanel(snapshot) {
     'aria-label': 'Cerrar panel'
   }, ['×']);
 
-  const weakBlocksCount = snapshot.behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).length;
+  const weakBlocksCount = snapshot.behavioralMapping.filter(block => block.present === 'no' || block.quality <= 2).length;
   const classification = snapshot.pageClassification || {};
   const findings = snapshot.findings || [];
   const findingGroups = groupFindings(findings);
@@ -503,10 +505,10 @@ function renderPanel(snapshot) {
   ]);
 
   const grid = element('div', { class: 'grid' }, [
-    metric('UX frictions', uxFrictionCount),
-    metric('Weak blocks', weakBlocksCount),
-    metric('DS risks', dsRiskCount),
-    metric('Manual review', manualReviewCount)
+    metric('Fricciones UX', uxFrictionCount),
+    metric('Bloques a revisar', weakBlocksCount),
+    metric('Riesgos DS', dsRiskCount),
+    metric('Revisión manual', manualReviewCount)
   ]);
 
   const swatches = element('div', { class: 'swatches' });
@@ -525,14 +527,14 @@ function renderPanel(snapshot) {
 
   const mappingRows = snapshot.behavioralMapping.map(block => element('div', { class: 'mapping-row' }, [
     element('div', { class: 'mapping-copy' }, [
-      element('strong', {}, [block.label]),
+      element('strong', {}, [block.displayLabel || behavioralBlockDisplayLabel(block.block)]),
       element('div', { class: 'mapping-meta' }, [
         element('span', { class: 'pill' }, [presenceLabel(block.present)]),
-        element('span', { class: 'pill' }, [`score ${block.quality}/5`]),
-        element('span', { class: 'pill' }, [blockConfidence(block)])
+        element('span', { class: 'pill' }, [`calidad ${block.quality}/5`]),
+        element('span', { class: 'pill' }, [confidenceLabel(block.confidence || blockConfidence(block))])
       ])
     ]),
-    element('span', { class: 'pill' }, [block.block])
+    element('span', { class: 'pill' }, [block.title || 'bloque'])
   ]));
 
   const topFindingNodes = topFindingsByType(findingGroups, findings).map(item => element('div', { class: `friction ${severityClass(item.finding.severity)}` }, [
@@ -544,7 +546,7 @@ function renderPanel(snapshot) {
       ]),
       element('span', { class: 'pill' }, [item.finding.priority])
     ]),
-    element('p', {}, [`${item.finding.confidence} confidence · ${item.finding.rationale}`])
+    element('p', {}, [`${confidenceLabel(item.finding.confidence)} · ${item.finding.rationale}`])
   ]));
 
   const body = element('div', { class: 'body' }, [
@@ -561,7 +563,7 @@ function renderPanel(snapshot) {
       element('h3', { class: 'section-title' }, ['Componentes']),
       element('div', { class: 'component-line' }, [
         element('span', {}, [componentSummary]),
-        element('span', { class: 'pill' }, [`${snapshot.components.counts.ctaGroups} CTA groups`])
+        element('span', { class: 'pill' }, [`${snapshot.components.counts.ctaGroups} grupos CTA`])
       ])
     ]),
     element('section', { class: 'section' }, [
@@ -580,15 +582,15 @@ function renderPanel(snapshot) {
     element('section', { class: 'section' }, [
       element('h3', { class: 'section-title' }, ['Lente conductual']),
       ...(classification.analysisMode === 'full_behavioral' ? [
-        element('p', { class: 'notice' }, [uxFrictionCount ? 'Hay fricciones UX de alta confianza; revisar hypothesis cards antes de actuar.' : 'No se detectan fricciones UX de alta confianza. Los weak blocks son revisión, no bloqueo crítico.'])
+        element('p', { class: 'notice' }, [uxFrictionCount ? 'Hay fricciones UX de alta confianza; revisar tarjetas de hipótesis antes de actuar.' : 'No se detectan fricciones UX de alta confianza. Los bloques a revisar son revisión, no bloqueo crítico.'])
       ] : [
         element('p', { class: 'notice' }, ['Salida acotada a snapshot, inventario, accesibilidad y notas manuales.'])
       ])
     ]),
     element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Top findings']),
+      element('h3', { class: 'section-title' }, ['Hallazgos principales']),
       ...(topFindingNodes.length ? [element('div', { class: 'top-findings' }, topFindingNodes)] : [
-        element('p', { class: 'notice' }, ['No hay findings priorizados. Revisa el markdown para baseline y notas manuales.'])
+        element('p', { class: 'notice' }, ['No hay hallazgos priorizados. Revisa el markdown para baseline y notas manuales.'])
       ])
     ])
   ]);
@@ -596,7 +598,7 @@ function renderPanel(snapshot) {
   const copyButtons = [
     element('button', { class: 'copy primary', type: 'button', 'data-copy': 'design' }, ['Copiar design-context.md']),
     element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'json' }, ['Copiar JSON']),
-    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'issue' }, ['Copiar GitHub Issue'])
+    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'issue' }, ['Copiar issue GitHub'])
   ];
 
   const copyStatus = element('p', { class: 'notice', 'data-copy-status': '' }, [
@@ -608,7 +610,7 @@ function renderPanel(snapshot) {
       element('div', { class: 'brand' }, [
         element('span', { class: 'brand-mark' }, ['C']),
         element('div', {}, [
-          element('p', { class: 'kicker' }, ['Design context']),
+          element('p', { class: 'kicker' }, ['Contexto de diseño']),
           element('h2', { id: 'contextic-title' }, ['Contextic']),
           element('p', { class: 'subtitle' }, ['Evidencia, confianza e hipótesis listas para handoff.'])
         ])
@@ -655,10 +657,18 @@ function metric(label, value) {
 }
 
 function presenceLabel(value = '') {
-  if (value === 'sí') return 'present';
-  if (value === 'parcial') return 'partial';
-  if (value === 'no') return 'missing';
-  return value || 'unknown';
+  if (value === 'sí') return 'presente';
+  if (value === 'parcial') return 'parcial';
+  if (value === 'no') return 'ausente';
+  return value || 'desconocido';
+}
+
+function confidenceLabel(value = '') {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'high' || normalized === 'alta') return 'confianza alta';
+  if (normalized === 'medium' || normalized === 'media') return 'confianza media';
+  if (normalized === 'low' || normalized === 'baja') return 'confianza baja';
+  return 'confianza desconocida';
 }
 
 function blockConfidence(block = {}) {
@@ -671,8 +681,8 @@ function topFindingsByType(groups = {}, findings = []) {
   const buckets = [
     ['UX', groups.ux || []],
     ['DS', groups.designSystem || []],
-    ['Accessibility', groups.accessibility || []],
-    ['Review', [...(groups.manualReview || []), ...findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review')]]
+    ['Accesibilidad', groups.accessibility || []],
+    ['Revisión', [...(groups.manualReview || []), ...findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review')]]
   ];
   const items = [];
 

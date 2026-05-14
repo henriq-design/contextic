@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { generateHypotheses } from '../src/hypotheses.js';
+import { generateHypotheses, generateReviewTasks } from '../src/hypotheses.js';
 import { buildDesignContextMarkdown } from '../src/export-markdown.js';
 
 const landing = {
@@ -57,25 +57,160 @@ test('design system debt creates system hypothesis, not conversion hypothesis', 
   assert.doesNotMatch(hypotheses[0].then, /conversion/i);
 });
 
-test('no high-confidence finding returns baseline manual review hypothesis', () => {
+test('no high-confidence finding returns review task instead of baseline hypothesis', () => {
   const hypotheses = generateHypotheses([], landing);
+  const reviewTasks = generateReviewTasks([], landing);
 
-  assert.equal(hypotheses[0].title, 'Baseline manual review');
-  assert.equal(hypotheses[0].experimentType, 'design review');
-  assert.ok(hypotheses[0].metrics.guardrail.length > 0);
+  assert.deepEqual(hypotheses, []);
+  assert.equal(reviewTasks[0].id, 'R1');
+  assert.match(reviewTasks[0].question, /acción principal|promesa|experimento/i);
 });
 
-test('weak Where block markdown uses baseline validation, not maintain-current generic copy', () => {
+test('weak Where block markdown creates review task, not generic hypothesis', () => {
   const markdown = buildDesignContextMarkdown(createSnapshot());
 
+  assert.match(markdown, /## Review tasks/);
   assert.match(markdown, /## Hypotheses and experiments/);
-  assert.match(markdown, /Review the clarity of the primary CTA|review the clarity of the primary CTA/i);
-  assert.match(markdown, /primary CTA CTR/);
-  assert.match(markdown, /bounce rate/);
+  assert.match(markdown, /Question:/);
+  assert.match(markdown, /How to validate:/);
+  assert.match(markdown, /No se generaron hipótesis accionables/);
+  assert.doesNotMatch(markdown, /Resolving this finding should improve/);
   assert.doesNotMatch(markdown, /Mantener la versión actual/);
 });
 
-function createSnapshot() {
+test('Vodafone CTA label generates specific product hypothesis', () => {
+  const hypotheses = generateHypotheses([], landing, {
+    behavioralMapping: [{
+      block: 'where',
+      displayLabel: 'Dónde actuar',
+      confidence: 'medium',
+      diagnostics: {
+        ctaAssessment: {
+          primary: { label: 'Acceso a mi seguro' }
+        }
+      }
+    }]
+  });
+
+  assert.equal(hypotheses[0].title, 'Validate hero CTA intent');
+  assert.match(hypotheses[0].because, /"Acceso a mi seguro"/);
+  assert.match(hypotheses[0].weBelieve, /clientes existentes/);
+  assert.match(hypotheses[0].ifWe, /contratación\/simulación/);
+  assert.equal(hypotheses[0].metrics.primary, 'primary CTA CTR');
+  assert.deepEqual(hypotheses[0].metrics.secondary, ['qualified conversion rate', 'secondary CTA clicks', 'bounce']);
+  assert.deepEqual(hypotheses[0].metrics.guardrail, ['accessibility regressions']);
+});
+
+test('manual low-confidence Who and How do not generate generic hypotheses', () => {
+  const findings = [
+    {
+      id: 'review.weak-block.who',
+      type: 'manual_review',
+      title: 'Bloque a revisar: Para quién (who)',
+      evidence: ['Target funcional detectado en caso de uso: “para tus dispositivos”.'],
+      affectedArea: 'who',
+      severity: 1,
+      confidence: 'low',
+      impact: 'medium',
+      effort: 'medium',
+      priority: 'Review',
+      rationale: 'Validar si el target funcional necesita traducirse a segmento comercial.'
+    },
+    {
+      id: 'review.weak-block.how',
+      type: 'manual_review',
+      title: 'Bloque a revisar: Cómo (how)',
+      evidence: ['Se detecta estructura de pasos o proceso.'],
+      affectedArea: 'how',
+      severity: 1,
+      confidence: 'low',
+      impact: 'medium',
+      effort: 'medium',
+      priority: 'Review',
+      rationale: 'Validar qué ocurre tras el CTA.'
+    }
+  ];
+
+  const hypotheses = generateHypotheses(findings, landing);
+  const reviewTasks = generateReviewTasks(findings, landing);
+
+  assert.deepEqual(hypotheses, []);
+  assert.equal(reviewTasks.length, 2);
+  assert.doesNotMatch(JSON.stringify(hypotheses), /Weak block: Who|Test:|Resolving this finding/);
+});
+
+test('handoff summary deduplicates manual review items and omits empty top hypothesis', () => {
+  const markdown = buildDesignContextMarkdown(createSnapshot({
+    behavioralMapping: [
+      {
+        block: 'who',
+        displayLabel: 'Para quién',
+        present: 'parcial',
+        quality: 2,
+        evidence: ['Target funcional detectado en caso de uso: “para tus dispositivos”.'],
+        missing: ['Validar si el target funcional necesita traducirse a segmento comercial.'],
+        severity: 1
+      },
+      {
+        block: 'how',
+        displayLabel: 'Cómo',
+        present: 'parcial',
+        quality: 3,
+        evidence: ['Se detecta estructura de pasos o proceso.'],
+        missing: ['Validar qué ocurre tras el CTA: alta, contratación, gestión, activación, tiempos y siguiente estado.'],
+        severity: 1
+      },
+      {
+        block: 'where',
+        displayLabel: 'Dónde actuar',
+        present: 'parcial',
+        quality: 2,
+        evidence: ['CTA detectado con baja jerarquía.'],
+        missing: ['La acción principal requiere revisión manual.'],
+        severity: 2
+      }
+    ]
+  }));
+  const handoff = markdown.split('## Handoff summary')[1];
+
+  assert.equal(countMatches(handoff, '[Who]'), 1);
+  assert.equal(countMatches(handoff, '[How]'), 1);
+  assert.equal(countMatches(handoff, '[Where]'), 1);
+  assert.doesNotMatch(handoff, /### Top hypothesis/);
+});
+
+test('recommended metrics do not duplicate metrics between primary and secondary', () => {
+  const markdown = buildDesignContextMarkdown(createSnapshot({
+    hypotheses: [
+      {
+        id: 'H1',
+        title: 'Validate CTA',
+        because: 'CTA evidence.',
+        weBelieve: 'CTA can improve progression.',
+        ifWe: 'Change CTA.',
+        then: 'Progression improves.',
+        metrics: {
+          primary: 'primary CTA CTR',
+          secondary: ['primary CTA CTR', 'qualified conversion rate', 'bounce'],
+          guardrail: ['accessibility regressions']
+        },
+        segments: ['mobile users'],
+        confidence: 'medium',
+        effort: 'medium',
+        experimentType: 'A/B test'
+      }
+    ]
+  }));
+  const metrics = markdown.split('## Recommended metrics')[1].split('## Handoff summary')[0];
+  const primary = metrics.split('### Secondary')[0];
+  const secondary = metrics.split('### Secondary')[1].split('### Guardrails')[0];
+
+  assert.match(primary, /primary CTA CTR/);
+  assert.doesNotMatch(secondary, /primary CTA CTR/);
+  assert.match(secondary, /qualified conversion rate/);
+});
+
+function createSnapshot(overrides = {}) {
   return {
     meta: {
       url: 'https://example.com',
@@ -108,6 +243,11 @@ function createSnapshot() {
         metrics: ['CTR del CTA principal']
       }
     ],
-    behavioralRecommendation: { sections: [] }
+    behavioralRecommendation: { sections: [] },
+    ...overrides
   };
+}
+
+function countMatches(text, pattern) {
+  return (text.match(new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
 }

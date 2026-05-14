@@ -1,22 +1,34 @@
 import { compactText, getAccessibleName, getCandidateElements, isProbablyGenericLinkText, isVisibleElement } from './utils.js';
+import { classifyElementRegion } from './dom-regions.js';
 
 export function collectComponents(root = document.body) {
-  const buttons = Array.from(root.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"], a[class*="button"], a[class*="btn"]')).filter(isVisibleElement);
-  const links = Array.from(root.querySelectorAll('a[href]')).filter(isVisibleElement);
-  const inputs = Array.from(root.querySelectorAll('input, textarea, select')).filter(isVisibleElement);
-  const cards = Array.from(root.querySelectorAll('[class*="card"], article, [data-card]')).filter(isVisibleElement);
-  const alerts = Array.from(root.querySelectorAll('[role="alert"], [aria-live], .alert, [class*="toast"], [class*="notification"]')).filter(isVisibleElement);
-  const navigation = Array.from(root.querySelectorAll('nav, [role="navigation"]')).filter(isVisibleElement);
-  const forms = Array.from(root.querySelectorAll('form')).filter(isVisibleElement);
-  const images = Array.from(root.querySelectorAll('img')).filter(isVisibleElement);
-  const badges = Array.from(root.querySelectorAll('[class*="badge"], [class*="tag"], [class*="pill"], [data-badge]')).filter(isVisibleElement);
-  const dialogs = Array.from(root.querySelectorAll('dialog[open], [role="dialog"], [aria-modal="true"], [class*="modal"], [class*="dialog"]')).filter(isVisibleElement);
+  const allButtons = componentElements(root, 'button, [role="button"], input[type="button"], input[type="submit"], a[class*="button"], a[class*="btn"]');
+  const allLinks = componentElements(root, 'a[href]');
+  const allInputs = componentElements(root, 'input, textarea, select');
+  const allCards = componentElements(root, '[class*="card"], article, [data-card]');
+  const allAlerts = componentElements(root, '[role="alert"], [aria-live], .alert, [class*="toast"], [class*="notification"]');
+  const allNavigation = componentElements(root, 'nav, [role="navigation"]');
+  const allForms = componentElements(root, 'form');
+  const allImages = componentElements(root, 'img');
+  const allBadges = componentElements(root, '[class*="badge"], [class*="tag"], [class*="pill"], [data-badge]');
+  const allDialogs = componentElements(root, 'dialog[open], [role="dialog"], [aria-modal="true"], [class*="modal"], [class*="dialog"]');
+  const buttons = userFacingElements(allButtons);
+  const links = userFacingElements(allLinks);
+  const inputs = userFacingElements(allInputs);
+  const cards = userFacingElements(allCards);
+  const alerts = userFacingElements(allAlerts);
+  const navigation = userFacingElements(allNavigation);
+  const forms = userFacingElements(allForms);
+  const images = userFacingElements(allImages);
+  const badges = userFacingElements(allBadges);
+  const dialogs = userFacingElements(allDialogs);
   const ctaGroups = findCtaGroups(buttons, links);
 
   const buttonSamples = buttons.slice(0, 8).map(element => ({
     text: getAccessibleName(element),
     selector: describeElement(element),
-    disabled: element.matches(':disabled, [aria-disabled="true"]')
+    disabled: element.matches(':disabled, [aria-disabled="true"]'),
+    ...buildComponentContext(element)
   }));
 
   const unlabeledInputs = inputs.filter(input => !getAccessibleName(input));
@@ -38,6 +50,18 @@ export function collectComponents(root = document.body) {
       dialogs: dialogs.length,
       ctaGroups: ctaGroups.length
     },
+    systemHiddenComponents: {
+      buttons: allButtons.length - buttons.length,
+      links: allLinks.length - links.length,
+      inputs: allInputs.length - inputs.length,
+      forms: allForms.length - forms.length,
+      cards: allCards.length - cards.length,
+      alerts: allAlerts.length - alerts.length,
+      navigation: allNavigation.length - navigation.length,
+      images: allImages.length - images.length,
+      badges: allBadges.length - badges.length,
+      dialogs: allDialogs.length - dialogs.length
+    },
     samples: {
       buttons: buttonSamples,
       unlabeledInputs: unlabeledInputs.slice(0, 8).map(describeElement),
@@ -54,9 +78,41 @@ export function collectComponents(root = document.body) {
     raw: {
       buttons,
       links,
-      inputs
+      inputs,
+      allButtons,
+      allLinks,
+      allInputs
     }
   };
+}
+
+function componentElements(root, selector) {
+  return Array.from(root.querySelectorAll(selector))
+    .filter(isVisibleElement)
+    .map(element => ({ element, context: buildComponentContext(element) }));
+}
+
+function userFacingElements(items) {
+  return items.filter(item => item.context.isUserFacing).map(item => item.element);
+}
+
+function buildComponentContext(element) {
+  const region = classifyElementRegion(element);
+  const isVisible = isVisibleElement(element);
+  const isSystemOrHidden = region === 'hidden_or_system';
+  return {
+    region,
+    isVisible,
+    isUserFacing: isVisible && !isSystemOrHidden,
+    isInteractive: isInteractive(element),
+    isSystemOrHidden
+  };
+}
+
+function isInteractive(element) {
+  const tag = element.tagName?.toLowerCase?.() || '';
+  const role = String(element.getAttribute?.('role') || '').toLowerCase();
+  return ['button', 'a', 'input', 'select', 'textarea'].includes(tag) || role === 'button' || Boolean(element.getAttribute?.('tabindex'));
 }
 
 function findCtaGroups(buttons, links) {

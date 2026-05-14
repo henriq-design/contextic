@@ -1,5 +1,6 @@
 import { buildFindings } from './findings-prioritization.js';
-import { generateHypotheses } from './hypotheses.js';
+import { generateHypotheses, generateReviewTasks } from './hypotheses.js';
+import { behavioralBlockDisplayLabel } from './behavioral-model.js';
 
 const TOOL_NAME = 'Contextic';
 const LANGUAGE = 'es';
@@ -24,7 +25,8 @@ export function buildContexticReport(snapshot = {}) {
   const frictions = snapshot.frictions || [];
   const behavioralRecommendation = snapshot.behavioralRecommendation || {};
   const findings = snapshot.findings || buildFindings(snapshot);
-  const hypotheses = snapshot.hypotheses || generateHypotheses(findings, pageClassification);
+  const hypotheses = snapshot.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping });
+  const reviewTasks = snapshot.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping });
 
   return {
     meta: {
@@ -45,8 +47,10 @@ export function buildContexticReport(snapshot = {}) {
     scopeMap,
     detectedTokens: {
       colors: colors.colors || [],
+      systemHiddenVisualNoise: colors.systemHiddenVisualNoise || [],
       cssVariables: colors.cssVariables || [],
       typography: typography.typeStyles || [],
+      typographySystemHiddenVisualNoise: typography.systemHiddenVisualNoise || [],
       spacing: spacing.spacingScale || [],
       radius: spacing.radii || [],
       shadows: spacing.shadows || [],
@@ -55,6 +59,7 @@ export function buildContexticReport(snapshot = {}) {
     detectedComponents: buildDetectedComponents(components),
     findings,
     hypotheses,
+    reviewTasks,
     behavioralMapping: normalizeBehavioralMapping(behavioralMapping),
     uxFrictions: frictions.map(normalizeFrictionForReport),
     implementationRules: buildImplementationRules(behavioralRecommendation),
@@ -87,7 +92,7 @@ function inferScreenType(components, behavioralMapping) {
     return {
       value: 'Landing con formulario o captación',
       evidenceType: 'inference',
-      evidence: ['Se detectan formularios y señales de acción Where.']
+      evidence: ['Se detectan formularios y señales de acción en Dónde actuar (where).']
     };
   }
   if (counts.buttons > 0) {
@@ -118,7 +123,7 @@ function getMainConversionRisk(frictions, behavioralMapping) {
   if (!weak) return 'unknown';
 
   return {
-    value: `Bloque ${weak.label || weak.block} débil o ausente`,
+    value: `Bloque ${weak.displayLabel || behavioralBlockDisplayLabel(weak.block)} (${weak.block}) débil o ausente`,
     evidenceType: 'inference',
     evidence: weak.missing?.length ? weak.missing : ['Inferido desde calidad/presencia del mapa behavioral.']
   };
@@ -147,15 +152,18 @@ function normalizeBehavioralMapping(behavioralMapping) {
   return Object.fromEntries(behavioralMapping.map(block => [block.block, {
     block: block.block,
     label: block.label,
+    displayLabel: block.displayLabel || behavioralBlockDisplayLabel(block.block),
     present: block.present,
     quality: block.quality,
+    confidence: block.confidence || 'unknown',
     evidence: block.evidence || [],
     missing: block.missing || [],
     frictionType: block.frictionType || 'unknown',
     detectedFriction: block.detectedFriction || '',
     severity: block.severity ?? null,
     recommendation: block.recommendation || '',
-    metrics: block.metrics || []
+    metrics: block.metrics || [],
+    diagnostics: block.diagnostics || {}
   }]));
 }
 

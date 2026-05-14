@@ -31,7 +31,7 @@ test('behavioral notes are not the main axis above the technical snapshot', () =
   const componentIndex = markdown.indexOf('## Component inventory');
   const assessmentIndex = markdown.indexOf('## Behavioral assessment');
   const frictionIndex = markdown.indexOf('## UX findings');
-  const behavioralMapIndex = markdown.indexOf('### Behavioral block map');
+  const behavioralMapIndex = markdown.indexOf('### Mapa de bloques behavioral');
 
   assert.ok(snapshotIndex > -1);
   assert.ok(componentIndex > snapshotIndex);
@@ -238,6 +238,7 @@ function createSnapshot(overrides = {}) {
       {
         block: 'where',
         label: 'Where',
+        displayLabel: 'Dónde actuar',
         present: 'sí',
         quality: 3,
         evidence: ['CTA detectado'],

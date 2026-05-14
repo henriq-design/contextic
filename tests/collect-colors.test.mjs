@@ -69,6 +69,42 @@ globalThis.document = {
   }
 };
 
+test('neutral text color on visible div is inferred as text', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('div', {
+        text: 'Texto principal',
+        style: { color: '#0d0d0d' }
+      })
+    ])
+  ]);
+
+  const black = collectColors(root).colors.find(color => color.value === '#0d0d0d');
+
+  assert.ok(black);
+  assert.equal(black.suggestedRole, 'text');
+  assert.ok(['high', 'medium'].includes(black.roleConfidence));
+  assert.match(black.roleReason, /CSS property: color maps to text/i);
+});
+
+test('white in skip link remains text or utility, never warning', () => {
+  const root = tree('body', {}, [
+    tree('a', {
+      text: 'Saltar al contenido',
+      className: 'skip-link',
+      attributes: { href: '#main' },
+      style: { color: '#ffffff' }
+    })
+  ]);
+
+  const result = collectColors(root);
+  const white = result.systemHiddenVisualNoise.find(color => color.value === '#ffffff');
+
+  assert.ok(white);
+  assert.equal(result.colors.some(color => color.value === '#ffffff'), false);
+  assert.equal(white.usages[0].isSystemOrHidden, true);
+});
+
 test('red Vodafone-like color on visible CTA is primary or brand, not error', () => {
   const root = tree('body', {}, [
     tree('main', {}, [
@@ -118,12 +154,95 @@ test('green in skip link is utility, not success', () => {
     })
   ]);
 
-  const green = collectColors(root).colors.find(color => color.value === '#00aa00');
+  const result = collectColors(root);
+  const green = result.systemHiddenVisualNoise.find(color => color.value === '#00aa00');
 
   assert.ok(green);
-  assert.ok(['utility', 'unknown'].includes(green.suggestedRole));
-  assert.notEqual(green.suggestedRole, 'success');
-  assert.match(green.roleReason, /hidden\/system|utility/i);
+  assert.equal(result.colors.some(color => color.value === '#00aa00'), false);
+  assert.equal(green.usages[0].isSystemOrHidden, true);
+});
+
+test('color used only in hidden/system content is excluded from top visible colors', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('p', {
+        text: 'Contenido visible',
+        style: { color: '#111111' }
+      })
+    ]),
+    tree('div', {
+      text: 'Notificación técnica',
+      className: 'toast',
+      style: { backgroundColor: '#ffcc00' }
+    })
+  ]);
+
+  const result = collectColors(root);
+
+  assert.equal(result.colors.some(color => color.value === '#ffcc00'), false);
+  assert.ok(result.systemHiddenVisualNoise.find(color => color.value === '#ffcc00'));
+  assert.ok(result.colors.find(color => color.value === '#111111'));
+});
+
+test('css variables are annotated with visible usage status', () => {
+  const rootStyle = {
+    length: 2,
+    0: '--visible-color',
+    1: '--declared-color',
+    getPropertyValue(name) {
+      return name === '--visible-color' ? '#111111' : '#abcdef';
+    }
+  };
+  document.documentElement = new FakeElement('html', { style: rootStyle });
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('p', {
+        text: 'Contenido visible',
+        style: { color: '#111111' }
+      })
+    ])
+  ]);
+
+  const result = collectColors(root);
+
+  assert.equal(result.cssVariables.find(variable => variable.name === '--visible-color').usageStatus, 'used visible');
+  assert.equal(result.cssVariables.find(variable => variable.name === '--declared-color').usageStatus, 'unknown usage');
+  document.documentElement = new FakeElement('html', { style: { length: 0 } });
+});
+
+test('grey borderTopColor is classified as border', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('div', {
+        className: 'panel',
+        style: { borderTopColor: '#333333' }
+      })
+    ])
+  ]);
+
+  const grey = collectColors(root).colors.find(color => color.value === '#333333');
+
+  assert.ok(grey);
+  assert.equal(grey.suggestedRole, 'border');
+  assert.match(grey.roleReason, /border color maps to border/i);
+});
+
+test('grey header text is not inferred as info without explicit informational component', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('h2', {
+        text: 'Información de tarifas',
+        className: 'section-info-title',
+        style: { color: '#333333' }
+      })
+    ])
+  ]);
+
+  const grey = collectColors(root).colors.find(color => color.value === '#333333');
+
+  assert.ok(grey);
+  assert.equal(grey.suggestedRole, 'text');
+  assert.notEqual(grey.suggestedRole, 'info');
 });
 
 function tree(tag, options = {}, children = []) {
