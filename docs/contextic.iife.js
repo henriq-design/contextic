@@ -810,42 +810,73 @@ function normalizeText(text) {
 
 // ---- src/collect-colors.js ----
 
-const COLOR_PROPERTIES = ['color', 'backgroundColor', 'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor', 'outlineColor'];
-const COLOR_ROLES = new Set(['text', 'surface', 'brand', 'primary', 'secondary', 'accent', 'border', 'focus', 'error', 'success', 'warning', 'info', 'utility', 'unknown']);
+const COLOR_PROPERTIES = [
+  'color',
+  'backgroundColor',
+  'background-color',
+  'borderColor',
+  'borderTopColor',
+  'borderRightColor',
+  'borderBottomColor',
+  'borderLeftColor',
+  'outline',
+  'outlineColor',
+  'boxShadow',
+  'textShadow'
+];
+const COLOR_ROLES = new Set(['text', 'surface', 'brand', 'primary', 'secondary', 'accent', 'border', 'focus', 'shadow', 'error', 'success', 'warning', 'info', 'utility', 'unknown']);
 
 function collectColors(root = document.body, options = {}) {
   const limit = options.limit || 16;
   const colorUsage = new Map();
+  const userFacingColorUsage = new Map();
+  const systemColorUsage = new Map();
   const colorSamples = new Map();
+  const userFacingColorSamples = new Map();
   const colorContexts = new Map();
   const cssVariables = collectCssVariables();
 
   for (const element of getCandidateElements(root)) {
     const style = window.getComputedStyle(element);
+    const seenPropertyColors = new Set();
 
     for (const property of COLOR_PROPERTIES) {
-      const normalized = normalizeColor(style[property]);
-      if (!normalized) continue;
-      const context = buildColorContext(element, property);
+      const colors = colorsFromStyleProperty(style, property);
+      for (const normalized of colors) {
+        if (!normalized) continue;
+        const usageKey = `${normalizeCssProperty(property)}:${normalized}`;
+        if (seenPropertyColors.has(usageKey)) continue;
+        seenPropertyColors.add(usageKey);
 
-      // Los fondos y colores de texto suelen ser más relevantes que bordes repetidos por defecto.
-      const weight = context.region === 'hidden_or_system' ? 0.25 : property === 'backgroundColor' || property === 'color' ? 2 : 1;
-      incrementMap(colorUsage, normalized, weight);
-      if (!colorContexts.has(normalized)) colorContexts.set(normalized, []);
-      colorContexts.get(normalized).push(context);
+        const context = buildColorContext(element, property);
 
-      if (!colorSamples.has(normalized)) {
-        colorSamples.set(normalized, {
-          selector: readableSelector(element),
-          property,
-          context
-        });
+        // Los fondos y colores de texto suelen ser más relevantes que bordes repetidos por defecto.
+        const weight = ['backgroundColor', 'background-color', 'color'].includes(property) ? 2 : 1;
+        incrementMap(colorUsage, normalized, weight);
+        incrementMap(context.isUserFacing ? userFacingColorUsage : systemColorUsage, normalized, weight);
+        if (!colorContexts.has(normalized)) colorContexts.set(normalized, []);
+        colorContexts.get(normalized).push(context);
+
+        if (!colorSamples.has(normalized)) {
+          colorSamples.set(normalized, {
+            selector: readableSelector(element),
+            property,
+            context
+          });
+        }
+        if (context.isUserFacing && !userFacingColorSamples.has(normalized)) {
+          userFacingColorSamples.set(normalized, {
+            selector: readableSelector(element),
+            property,
+            context
+          });
+        }
       }
     }
   }
 
-  const colors = topFromMap(colorUsage, limit).map(item => {
-    const sample = colorSamples.get(item.value);
+  const colors = topFromMap(userFacingColorUsage, limit).map(item => {
+    const sample = userFacingColorSamples.get(item.value) || colorSamples.get(item.value);
     const contexts = colorContexts.get(item.value) || [];
     const role = guessColorRole(item.value, item.count, contexts, cssVariables);
     return {
@@ -857,12 +888,35 @@ function collectColors(root = document.body, options = {}) {
       roleReason: role.reason
     };
   });
+  const systemHiddenVisualNoise = topFromMap(systemColorUsage, 8)
+    .filter(item => !userFacingColorUsage.has(item.value))
+    .map(item => ({
+      ...item,
+      sample: colorSamples.get(item.value),
+      usages: (colorContexts.get(item.value) || []).filter(context => context.isSystemOrHidden).slice(0, 4)
+    }));
 
   return {
     colors,
+    allColors: topFromMap(colorUsage, limit),
+    systemHiddenVisualNoise,
     totalUniqueColors: colorUsage.size,
-    cssVariables
+    cssVariables: annotateCssVariableUsage(cssVariables, colorContexts)
   };
+}
+
+function colorsFromStyleProperty(style, property) {
+  const rawValue = style[property] || style.getPropertyValue?.(property);
+  if (!rawValue) return [];
+  if (property === 'boxShadow' || property === 'textShadow' || property === 'outline') return extractColors(rawValue);
+  const normalized = normalizeColor(rawValue);
+  return normalized ? [normalized] : [];
+}
+
+function extractColors(value) {
+  const text = String(value || '').toLowerCase();
+  const matches = text.match(/#[0-9a-f]{3,8}\b|rgba?\([^)]+\)/gi) || [];
+  return Array.from(new Set(matches.map(match => normalizeColor(match)).filter(Boolean)));
 }
 
 function readableSelector(element) {
@@ -875,21 +929,40 @@ function buildColorContext(element, property) {
   const selector = readableSelector(element);
   const region = classifyElementRegion(element);
   const componentType = inferComponentType(element);
-  const visible = region !== 'hidden_or_system';
+  const isVisible = true;
+  const isSystemOrHidden = region === 'hidden_or_system';
+  const isUserFacing = isVisible && !isSystemOrHidden;
   const interactive = isInteractive(element);
   const appearsInCta = interactive && isMainAction(element);
-  const validationContext = inferValidationContext(element);
+  const semanticContext = semanticRoleFromContext(element, { componentType, region });
 
   return {
     property,
     selector,
     componentType,
     region,
-    visible,
+    visible: isUserFacing,
+    isVisible,
+    isUserFacing,
+    isInteractive: interactive,
+    isSystemOrHidden,
     interactive,
     appearsInCta,
-    validationContext
+    semanticContext: semanticContext.role,
+    semanticReason: semanticContext.reason
   };
+}
+
+function annotateCssVariableUsage(cssVariables, colorContexts) {
+  return cssVariables.map(variable => {
+    const normalized = normalizeColor(variable.value);
+    const contexts = normalized ? colorContexts.get(normalized) || [] : [];
+    const visibleUse = contexts.some(context => context.isUserFacing);
+    return {
+      ...variable,
+      usageStatus: visibleUse ? 'used visible' : contexts.length ? 'declared only' : 'unknown usage'
+    };
+  });
 }
 
 function inferComponentType(element) {
@@ -901,7 +974,8 @@ function inferComponentType(element) {
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return 'form_field';
   if (tag === 'form') return 'form';
   if (tag === 'nav' || role === 'navigation') return 'navigation';
-  if (role === 'alert' || role === 'status') return 'alert';
+  if (role === 'alert' || role === 'status' || /\b(alert|toast|banner|message)\b/.test(classAndId)) return 'alert';
+  if (/\b(help|tip|tooltip|hint)\b/.test(classAndId)) return 'help';
   if (/\b(card)\b/.test(classAndId)) return 'card';
   if (/\b(logo|brand)\b/.test(classAndId)) return 'brand_asset';
   return 'static';
@@ -919,23 +993,49 @@ function isMainAction(element) {
   return /\b(cta|primary|main-action|hero|button|btn|brand)\b/.test(descriptor) || /\b(comprar|contratar|empezar|crear|solicitar|contactar|get started|buy|start|sign up|request)\b/.test(text);
 }
 
-function inferValidationContext(element) {
+function semanticRoleFromContext(element, context = {}) {
+  if (context.region === 'hidden_or_system') return { role: 'none', reason: 'Hidden/system or utility context is not semantic state evidence.' };
+
   const descriptor = elementDescriptor(element);
   const role = String(element.getAttribute?.('role') || '').toLowerCase();
   const ariaInvalid = element.getAttribute?.('aria-invalid') === 'true';
   const text = String(element.textContent || '').toLowerCase();
+  const evidence = `${descriptor} ${text}`;
+  const isAlert = role === 'alert' || context.componentType === 'alert';
 
-  if (ariaInvalid || role === 'alert' || /\b(error|invalid|danger|destructive|delete|remove|eliminar|borrar)\b/.test(descriptor + ' ' + text)) return 'error';
-  if (role === 'status' || /\b(success|valid|confirmation|confirmed|completed|complete|ok|done|exito|éxito|confirmado|completado)\b/.test(descriptor + ' ' + text)) return 'success';
-  if (/\b(warning|warn|alerta|aviso)\b/.test(descriptor + ' ' + text)) return 'warning';
-  if (/\b(info|notice|help|ayuda)\b/.test(descriptor + ' ' + text)) return 'info';
-  return 'none';
+  if (ariaInvalid) return { role: 'error', reason: 'aria-invalid="true" is strong error evidence.' };
+  if (/\b(error|invalid|danger|destructive)\b/.test(descriptor)) return { role: 'error', reason: 'Class, id or data attribute contains error/invalid/danger evidence.' };
+  if (/\b(error|errores|obligatorio|obligatoria|inv[aá]lido|inv[aá]lida|fallo|failed|failure)\b/.test(text)) return { role: 'error', reason: 'Visible copy contains explicit error/required/invalid/failure language.' };
+  if (isAlert && /\b(error|errores|obligatorio|obligatoria|inv[aá]lido|inv[aá]lida|fallo|failed|failure)\b/.test(evidence)) return { role: 'error', reason: 'Alert component carries explicit error language.' };
+
+  if (/\b(success|valid|completed|complete|confirmation|confirmed)\b/.test(descriptor)) return { role: 'success', reason: 'Class, id or data attribute contains success/valid/completed evidence.' };
+  if (role === 'status' && /\b(success|valid|confirmed|completed|complete|ok|done|[eé]xito|confirmado|confirmada|completado|completada)\b/.test(text)) return { role: 'success', reason: 'role="status" contains positive confirmation copy.' };
+  if (/\b(success|confirmed|completed|complete|done|[eé]xito|correcto|confirmado|confirmada|completado|completada)\b/.test(text)) return { role: 'success', reason: 'Visible copy contains confirmation language.' };
+
+  if (/\b(warning|caution|notice)\b/.test(descriptor)) return { role: 'warning', reason: 'Class, id or data attribute contains warning/caution/notice evidence.' };
+  if (isAlert && !/\b(error|danger|destructive|invalid)\b/.test(evidence)) return { role: 'warning', reason: 'Non-destructive alert component is warning evidence.' };
+  if (/\b(warning|caution|advertencia|aviso|precauci[oó]n)\b/.test(text)) return { role: 'warning', reason: 'Visible copy contains warning/advisory language.' };
+
+  if (context.componentType !== 'link' && (context.componentType === 'help' || /\b(alert-info|info-alert|help|tip|tooltip|hint)\b/.test(descriptor))) {
+    return { role: 'info', reason: 'Explicit info/help/tip component evidence.' };
+  }
+  return { role: 'none', reason: '' };
 }
 
 function elementDescriptor(element) {
   const id = element.id || '';
   const classes = Array.from(element.classList || []).join(' ');
-  return `${id} ${classes}`.toLowerCase();
+  const attributes = elementAttributes(element)
+    .filter(attribute => /^(class|id|data-|aria-|role)/i.test(attribute.name || ''))
+    .map(attribute => `${attribute.name || ''} ${attribute.value || ''}`)
+    .join(' ');
+  return `${id} ${classes} ${attributes}`.toLowerCase();
+}
+
+function elementAttributes(element) {
+  if (!element?.attributes) return [];
+  if (typeof element.attributes[Symbol.iterator] === 'function') return Array.from(element.attributes);
+  return Object.entries(element.attributes).map(([name, value]) => ({ name, value }));
 }
 
 function collectCssVariables() {
@@ -993,10 +1093,12 @@ function guessColorRole(hex, count, contexts = [], cssVariables = []) {
 
   if (!relevantContexts.length) return role('utility', 'low', 'Only observed in hidden/system or utility contexts.');
 
-  if (hasValidationContext(relevantContexts, 'error')) return role('error', 'high', 'Used in explicit error/invalid/destructive context.');
-  if (hasValidationContext(relevantContexts, 'success')) return role('success', 'high', 'Used in explicit success/valid/confirmation context.');
-  if (hasValidationContext(relevantContexts, 'warning')) return role('warning', 'high', 'Used in explicit warning context.');
-  if (hasValidationContext(relevantContexts, 'info')) return role('info', 'medium', 'Used in explicit informational context.');
+  const baseRole = baseRoleFromCssProperty(hex, count, relevantContexts, variableHints, { luminance, saturation });
+  const semanticRole = semanticRoleFromContexts(relevantContexts);
+  if (semanticRole.role !== 'none') {
+    const confidence = semanticRole.role === 'info' ? 'medium' : 'high';
+    return role(semanticRole.role, confidence, `${semanticRole.reason} Semantic state overrides base CSS role "${baseRole.role}".`);
+  }
 
   if (variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) && isActionColor(relevantContexts)) {
     return role('primary', 'high', 'Brand/primary variable used on visible main action.');
@@ -1007,26 +1109,68 @@ function guessColorRole(hex, count, contexts = [], cssVariables = []) {
     return role('primary', 'medium', 'Used as background color on visible CTA button or main action.');
   }
   if (relevantContexts.some(context => context.componentType === 'brand_asset')) return role('brand', 'medium', 'Used in visible logo or brand asset context.');
-  if (relevantContexts.some(context => context.property === 'outlineColor')) return role('focus', 'medium', 'Used as outline/focus color.');
-  if (relevantContexts.some(context => context.property.toLowerCase().includes('border'))) return role('border', saturation < 0.25 ? 'medium' : 'low', 'Used primarily as border color.');
 
-  if (luminance > 0.92 && count > 8) return role('surface', 'medium', 'Frequent light color used on visible elements.');
-  if (luminance < 0.12 && count > 8) return role('text', 'medium', 'Frequent dark color used on visible elements.');
   if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'Role inferred from CSS variable name and visible usage.');
-  if (saturation > 0.35 && count > 1) return role('accent', 'low', 'Saturated visible color without semantic state evidence; kept conservative.');
-  return role('unknown', 'low', 'Insufficient contextual evidence for a semantic role.');
+  return baseRole;
 }
 
 function role(roleName, confidence, reason) {
   return { role: COLOR_ROLES.has(roleName) ? roleName : 'unknown', confidence, reason };
 }
 
-function hasValidationContext(contexts, type) {
-  return contexts.some(context => context.validationContext === type);
+function baseRoleFromCssProperty(hex, count, contexts, variableHints, metrics) {
+  const { luminance, saturation } = metrics;
+  const properties = contexts.map(context => context.property);
+  const hasProperty = matcher => properties.some(property => matcher(normalizeCssProperty(property)));
+
+  if (hasProperty(property => property === 'color')) {
+    const confidence = count > 1 ? 'high' : 'medium';
+    return role('text', confidence, 'Base role from CSS property: color maps to text; no strong semantic state evidence found.');
+  }
+  if (hasProperty(property => property.includes('border'))) {
+    return role('border', saturation < 0.25 ? 'medium' : 'low', 'Base role from CSS property: border color maps to border.');
+  }
+  if (hasProperty(property => property === 'outline' || property === 'outlinecolor')) {
+    return role('focus', 'medium', 'Base role from CSS property: outline/outlineColor maps to focus.');
+  }
+  if (hasProperty(property => property === 'boxshadow' || property === 'textshadow')) {
+    return role('shadow', 'medium', 'Base role from CSS property: boxShadow/textShadow maps to shadow.');
+  }
+  if (hasProperty(property => property === 'backgroundcolor')) {
+    if (variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) && isActionColor(contexts)) {
+      return role('primary', 'high', 'Base role from background color on primary/brand variable used in CTA.');
+    }
+    if (isActionColor(contexts)) return role('primary', 'medium', 'Base role from CSS property: background color on visible CTA maps to primary.');
+    if (variableHints.some(name => /\b(brand)\b/.test(name))) return role('brand', 'medium', 'Base role from CSS variable name: brand background color.');
+    if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'Base role from CSS variable name and background usage.');
+    if (luminance > 0.92 || isNeutralHex(hex)) return role('surface', 'medium', 'Base role from CSS property: neutral/light background color maps to surface.');
+    if (saturation > 0.35) return role('accent', 'low', 'Base role from CSS property: saturated background without semantic state evidence maps to accent.');
+    return role('unknown', 'low', 'Base role from CSS property: background color without action, brand, accent or surface evidence remains unknown.');
+  }
+  return role('unknown', 'low', 'Insufficient CSS property evidence for a semantic role.');
+}
+
+function semanticRoleFromContexts(contexts) {
+  const semanticContexts = contexts.filter(context => context.semanticContext && context.semanticContext !== 'none');
+  const precedence = ['error', 'success', 'warning', 'info'];
+  for (const semanticRole of precedence) {
+    const match = semanticContexts.find(context => context.semanticContext === semanticRole);
+    if (match) return { role: semanticRole, reason: match.semanticReason || 'Strong semantic context evidence found.' };
+  }
+  return { role: 'none', reason: '' };
 }
 
 function isActionColor(contexts) {
-  return contexts.some(context => context.appearsInCta && ['backgroundColor', 'color', 'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor'].includes(context.property));
+  return contexts.some(context => context.appearsInCta && ['backgroundcolor', 'color', 'bordercolor', 'bordertopcolor', 'borderrightcolor', 'borderbottomcolor', 'borderleftcolor'].includes(normalizeCssProperty(context.property)));
+}
+
+function normalizeCssProperty(property) {
+  return String(property || '').replace(/-/g, '').toLowerCase();
+}
+
+function isNeutralHex(hex) {
+  const { r, g, b } = hexToRgb(hex);
+  return Math.max(r, g, b) - Math.min(r, g, b) <= 12;
 }
 
 function hexToRgb(hex) {
@@ -1062,10 +1206,14 @@ function collectTypography(root = document.body, options = {}) {
   const typeStyles = new Map();
   const fontFamilies = new Map();
   const fontSizes = new Map();
+  const allTypeStyles = new Map();
+  const systemTypeStyles = new Map();
+  const typeStyleSamples = new Map();
 
   for (const element of getCandidateElements(root)) {
     const text = element.textContent?.trim();
     if (!text) continue;
+    const context = buildTypographyContext(element);
 
     const style = window.getComputedStyle(element);
     const fontSize = toPxNumber(style.fontSize);
@@ -1077,17 +1225,47 @@ function collectTypography(root = document.body, options = {}) {
     if (!fontSize) continue;
 
     const key = `${fontFamily} | ${fontSize}px / ${lineHeight || 'normal'}px | ${fontWeight} | ${letterSpacing}px`;
-    incrementMap(typeStyles, key);
-    incrementMap(fontFamilies, fontFamily);
-    incrementMap(fontSizes, `${fontSize}px`);
+    incrementMap(allTypeStyles, key);
+    incrementMap(context.isUserFacing ? typeStyles : systemTypeStyles, key);
+    if (context.isUserFacing) {
+      incrementMap(fontFamilies, fontFamily);
+      incrementMap(fontSizes, `${fontSize}px`);
+    }
+    if (!typeStyleSamples.has(key)) typeStyleSamples.set(key, context);
   }
 
   return {
-    typeStyles: topFromMap(typeStyles, limit),
+    typeStyles: topFromMap(typeStyles, limit).map(item => ({ ...item, sample: typeStyleSamples.get(item.value) })),
+    allTypeStyles: topFromMap(allTypeStyles, limit),
+    systemHiddenVisualNoise: topFromMap(systemTypeStyles, 6)
+      .filter(item => !typeStyles.has(item.value))
+      .map(item => ({ ...item, sample: typeStyleSamples.get(item.value) })),
     fontFamilies: topFromMap(fontFamilies, 6),
     fontSizes: topFromMap(fontSizes, 10),
-    totalUniqueTypeStyles: typeStyles.size
+    totalUniqueTypeStyles: allTypeStyles.size
   };
+}
+
+function buildTypographyContext(element) {
+  const region = classifyElementRegion(element);
+  const isVisible = true;
+  const isSystemOrHidden = region === 'hidden_or_system';
+  const tag = element.tagName?.toLowerCase?.() || '';
+  const role = String(element.getAttribute?.('role') || '').toLowerCase();
+  return {
+    selector: readableSelector(element),
+    region,
+    isVisible,
+    isUserFacing: isVisible && !isSystemOrHidden,
+    isInteractive: ['button', 'a', 'input', 'select', 'textarea'].includes(tag) || role === 'button',
+    isSystemOrHidden
+  };
+}
+
+function readableSelector(element) {
+  const id = element.id ? `#${element.id}` : '';
+  const classes = Array.from(element.classList || []).slice(0, 2).map(name => `.${name}`).join('');
+  return `${element.tagName.toLowerCase()}${id}${classes}` || element.tagName.toLowerCase();
 }
 
 function cleanFontFamily(value) {
@@ -1149,22 +1327,33 @@ function sortPxItems(items) {
 // ---- src/collect-components.js ----
 
 function collectComponents(root = document.body) {
-  const buttons = Array.from(root.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"], a[class*="button"], a[class*="btn"]')).filter(isVisibleElement);
-  const links = Array.from(root.querySelectorAll('a[href]')).filter(isVisibleElement);
-  const inputs = Array.from(root.querySelectorAll('input, textarea, select')).filter(isVisibleElement);
-  const cards = Array.from(root.querySelectorAll('[class*="card"], article, [data-card]')).filter(isVisibleElement);
-  const alerts = Array.from(root.querySelectorAll('[role="alert"], [aria-live], .alert, [class*="toast"], [class*="notification"]')).filter(isVisibleElement);
-  const navigation = Array.from(root.querySelectorAll('nav, [role="navigation"]')).filter(isVisibleElement);
-  const forms = Array.from(root.querySelectorAll('form')).filter(isVisibleElement);
-  const images = Array.from(root.querySelectorAll('img')).filter(isVisibleElement);
-  const badges = Array.from(root.querySelectorAll('[class*="badge"], [class*="tag"], [class*="pill"], [data-badge]')).filter(isVisibleElement);
-  const dialogs = Array.from(root.querySelectorAll('dialog[open], [role="dialog"], [aria-modal="true"], [class*="modal"], [class*="dialog"]')).filter(isVisibleElement);
+  const allButtons = componentElements(root, 'button, [role="button"], input[type="button"], input[type="submit"], a[class*="button"], a[class*="btn"]');
+  const allLinks = componentElements(root, 'a[href]');
+  const allInputs = componentElements(root, 'input, textarea, select');
+  const allCards = componentElements(root, '[class*="card"], article, [data-card]');
+  const allAlerts = componentElements(root, '[role="alert"], [aria-live], .alert, [class*="toast"], [class*="notification"]');
+  const allNavigation = componentElements(root, 'nav, [role="navigation"]');
+  const allForms = componentElements(root, 'form');
+  const allImages = componentElements(root, 'img');
+  const allBadges = componentElements(root, '[class*="badge"], [class*="tag"], [class*="pill"], [data-badge]');
+  const allDialogs = componentElements(root, 'dialog[open], [role="dialog"], [aria-modal="true"], [class*="modal"], [class*="dialog"]');
+  const buttons = userFacingElements(allButtons);
+  const links = userFacingElements(allLinks);
+  const inputs = userFacingElements(allInputs);
+  const cards = userFacingElements(allCards);
+  const alerts = userFacingElements(allAlerts);
+  const navigation = userFacingElements(allNavigation);
+  const forms = userFacingElements(allForms);
+  const images = userFacingElements(allImages);
+  const badges = userFacingElements(allBadges);
+  const dialogs = userFacingElements(allDialogs);
   const ctaGroups = findCtaGroups(buttons, links);
 
   const buttonSamples = buttons.slice(0, 8).map(element => ({
     text: getAccessibleName(element),
     selector: describeElement(element),
-    disabled: element.matches(':disabled, [aria-disabled="true"]')
+    disabled: element.matches(':disabled, [aria-disabled="true"]'),
+    ...buildComponentContext(element)
   }));
 
   const unlabeledInputs = inputs.filter(input => !getAccessibleName(input));
@@ -1186,6 +1375,18 @@ function collectComponents(root = document.body) {
       dialogs: dialogs.length,
       ctaGroups: ctaGroups.length
     },
+    systemHiddenComponents: {
+      buttons: allButtons.length - buttons.length,
+      links: allLinks.length - links.length,
+      inputs: allInputs.length - inputs.length,
+      forms: allForms.length - forms.length,
+      cards: allCards.length - cards.length,
+      alerts: allAlerts.length - alerts.length,
+      navigation: allNavigation.length - navigation.length,
+      images: allImages.length - images.length,
+      badges: allBadges.length - badges.length,
+      dialogs: allDialogs.length - dialogs.length
+    },
     samples: {
       buttons: buttonSamples,
       unlabeledInputs: unlabeledInputs.slice(0, 8).map(describeElement),
@@ -1202,9 +1403,41 @@ function collectComponents(root = document.body) {
     raw: {
       buttons,
       links,
-      inputs
+      inputs,
+      allButtons,
+      allLinks,
+      allInputs
     }
   };
+}
+
+function componentElements(root, selector) {
+  return Array.from(root.querySelectorAll(selector))
+    .filter(isVisibleElement)
+    .map(element => ({ element, context: buildComponentContext(element) }));
+}
+
+function userFacingElements(items) {
+  return items.filter(item => item.context.isUserFacing).map(item => item.element);
+}
+
+function buildComponentContext(element) {
+  const region = classifyElementRegion(element);
+  const isVisible = isVisibleElement(element);
+  const isSystemOrHidden = region === 'hidden_or_system';
+  return {
+    region,
+    isVisible,
+    isUserFacing: isVisible && !isSystemOrHidden,
+    isInteractive: isInteractive(element),
+    isSystemOrHidden
+  };
+}
+
+function isInteractive(element) {
+  const tag = element.tagName?.toLowerCase?.() || '';
+  const role = String(element.getAttribute?.('role') || '').toLowerCase();
+  return ['button', 'a', 'input', 'select', 'textarea'].includes(tag) || role === 'button' || Boolean(element.getAttribute?.('tabindex'));
 }
 
 function findCtaGroups(buttons, links) {
@@ -1729,6 +1962,7 @@ function getElements(root, selector = '*') {
 
 
 // ---- src/findings-prioritization.js ----
+
 const FINDING_TYPES = new Set([
   'conversion_risk',
   'content_gap',
@@ -1798,17 +2032,20 @@ function frictionToFinding(friction = {}) {
     impact,
     effort,
     priority: assignPriority({ friction, type, severity, confidence, impact }),
-    rationale: buildRationale({ friction, type, severity, confidence, impact })
+    rationale: buildRationale({ friction, type, severity, confidence, impact }),
+    recommendation: friction.recommendation || '',
+    metric: friction.metric || '',
+    proposedChange: friction.proposedChange || friction.recommendation || ''
   });
 }
 
 function weakBlocksToReviewFindings(behavioralMapping = []) {
   return behavioralMapping
-    .filter(block => block.present !== 'sí' || block.quality <= 2)
+    .filter(block => block.present === 'no' || block.quality <= 2)
     .map(block => createFinding({
       id: `review.weak-block.${block.block}`,
       type: 'manual_review',
-      title: `Weak block: ${block.label || block.block}`,
+      title: `Bloque a revisar: ${block.displayLabel || behavioralBlockDisplayLabel(block.block)} (${block.block})`,
       evidence: [
         ...(block.evidence || []).slice(0, 2),
         ...(block.missing || []).slice(0, 2)
@@ -1819,7 +2056,7 @@ function weakBlocksToReviewFindings(behavioralMapping = []) {
       impact: 'medium',
       effort: 'medium',
       priority: 'Review',
-      rationale: 'Bloque behavioral débil sin fricción heurística fuerte; se mantiene como revisión manual, no como bloqueo crítico.'
+      rationale: block.missing?.[0] || 'Bloque behavioral débil sin fricción heurística fuerte; se mantiene como revisión manual, no como bloqueo crítico.'
     }));
 }
 
@@ -1835,7 +2072,10 @@ function createFinding(input = {}) {
     impact: normalizeImpact(input.impact),
     effort: normalizeEffort(input.effort),
     priority: input.priority || 'Review',
-    rationale: input.rationale || 'Prioridad asignada por evidencia, severidad, confianza e impacto.'
+    rationale: input.rationale || 'Prioridad asignada por evidencia, severidad, confianza e impacto.',
+    recommendation: input.recommendation || '',
+    metric: input.metric || '',
+    proposedChange: input.proposedChange || ''
   };
 }
 
@@ -1925,21 +2165,47 @@ function slugify(value = 'finding') {
 
 
 // ---- src/hypotheses.js ----
-function generateHypotheses(findings = [], pageClassification = {}) {
+function generateHypotheses(findings = [], pageClassification = {}, context = {}) {
+  const behavioralHypotheses = hypothesesFromBehavioralMapping(context.behavioralMapping || [], pageClassification);
   const rankedFindings = findings
-    .filter(shouldCreateHypothesis)
-    .sort(compareFindingsForHypotheses);
-  const hypotheses = rankedFindings.slice(0, 5).map((finding, index) => findingToHypothesis(finding, pageClassification, index + 1));
+    .filter(finding => shouldCreateHypothesis(finding))
+    .sort(compareFindingsForHypotheses)
+    .slice(0, Math.max(0, 5 - behavioralHypotheses.length))
+    .map((finding, index) => findingToHypothesis(finding, pageClassification, behavioralHypotheses.length + index + 1));
 
-  if (hypotheses.length) return hypotheses;
+  return [...behavioralHypotheses, ...rankedFindings].map((hypothesis, index) => ({
+    ...hypothesis,
+    id: `H${index + 1}`
+  }));
+}
 
-  return [baselineHypothesis(pageClassification)];
+function generateReviewTasks(findings = [], pageClassification = {}, context = {}) {
+  const tasks = [];
+  const actionableHypothesisAreas = new Set(hypothesesFromBehavioralMapping(context.behavioralMapping || [], pageClassification).map(hypothesis => hypothesis.affectedArea).filter(Boolean));
+
+  for (const finding of findings) {
+    if (!finding) continue;
+    if (shouldCreateHypothesis(finding)) continue;
+    tasks.push(findingToReviewTask(finding));
+  }
+
+  for (const block of context.behavioralMapping || []) {
+    if (!['who', 'how', 'where', 'when'].includes(block.block)) continue;
+    if (actionableHypothesisAreas.has(block.block)) continue;
+    if (block.present === 'sí' && block.quality >= 4 && !(block.missing || []).length) continue;
+    tasks.push(blockToReviewTask(block));
+  }
+
+  if (!tasks.length) tasks.push(baselineReviewTask(pageClassification));
+  return dedupeTasks(tasks).slice(0, 6).map((task, index) => ({ id: `R${index + 1}`, ...task }));
 }
 
 function shouldCreateHypothesis(finding) {
   if (!finding) return false;
-  if (finding.type === 'design_system_debt') return true;
-  return finding.priority !== 'Review' || finding.type === 'manual_review';
+  if (finding.type === 'manual_review' && finding.confidence === 'low') return hasActionableExperimentInputs(finding);
+  if (finding.confidence === 'low' && finding.priority === 'Review') return hasActionableExperimentInputs(finding);
+  if (finding.type === 'design_system_debt') return hasConcreteEvidence(finding) && hasPrimaryMetric(finding);
+  return hasConcreteEvidence(finding) && hasPrimaryMetric(finding) && (['medium', 'high'].includes(finding.confidence) || finding.impact === 'high');
 }
 
 function findingToHypothesis(finding, pageClassification, number) {
@@ -1962,24 +2228,40 @@ function findingToHypothesis(finding, pageClassification, number) {
   };
 }
 
-function baselineHypothesis(pageClassification) {
-  const archetype = pageClassification.archetype || 'unknown';
-  return {
+function hypothesesFromBehavioralMapping(behavioralMapping = [], pageClassification = {}) {
+  const where = behavioralMapping.find(block => block.block === 'where');
+  const primary = where?.diagnostics?.ctaAssessment?.primary;
+  if (!primary?.label) return [];
+  if (!/acceso\s+a\s+mi\s+seguro/i.test(primary.label)) return [];
+
+  return [{
     id: 'H1',
-    title: 'Baseline manual review',
-    because: 'No hay findings de alta confianza; la salida automática no debe inventar una recomendación de conversión.',
-    weBelieve: `La página ${archetype} necesita una revisión de baseline antes de cambiar la experiencia.`,
-    ifWe: 'Usamos el snapshot actual como baseline y validamos manualmente CTA, jerarquía, accesibilidad y eventos de analítica.',
-    then: 'Podremos decidir qué hipótesis merece diseño, QA o experimento sin elevar señales débiles a prioridad crítica.',
+    affectedArea: 'where',
+    title: 'Validate hero CTA intent',
+    because: `El CTA principal visible es "${primary.label}".`,
+    weBelieve: 'Si el objetivo de la landing es captación, el CTA puede parecer orientado a clientes existentes.',
+    ifWe: 'Probamos CTA primario de contratación/simulación y movemos "Acceso a mi seguro" a secundario.',
+    then: 'Debería mejorar el CTR del CTA primario y la progresión al flujo objetivo.',
     metrics: {
-      primary: 'baseline completion rate or primary task success',
-      secondary: ['primary CTA CTR', 'secondary action clicks', 'bounce rate'],
-      guardrail: ['no accessibility regressions', 'no increase in rage/dead clicks']
+      primary: 'primary CTA CTR',
+      secondary: ['qualified conversion rate', 'secondary CTA clicks', 'bounce'],
+      guardrail: ['accessibility regressions']
     },
     segments: segmentsFor(pageClassification),
-    confidence: 'low',
-    effort: 'low',
-    experimentType: 'design review'
+    confidence: where.confidence === 'high' ? 'high' : 'medium',
+    effort: 'medium',
+    experimentType: 'A/B test'
+  }];
+}
+
+function baselineReviewTask(pageClassification) {
+  const archetype = pageClassification.archetype || 'unknown';
+  return {
+    question: `¿La página ${archetype} tiene una acción principal, audiencia y promesa suficientemente claras para proponer un experimento?`,
+    evidence: ['No hay hipótesis accionables con evidencia, cambio propuesto y métrica clara.'],
+    whyItMatters: 'Evita convertir señales débiles en recomendaciones de producto prematuras.',
+    howToValidate: 'Revisar CTA principal, jerarquía, audiencia, copy post-CTA y eventos de analítica antes de diseñar variantes.',
+    owner: 'product'
   };
 }
 
@@ -1987,6 +2269,118 @@ function hypothesisTitle(finding, isDesignSystem) {
   if (isDesignSystem) return `System hypothesis: ${finding.title}`;
   if (finding.affectedArea === 'where' || /cta/i.test(finding.title)) return `Clarify the primary CTA: ${finding.title}`;
   return `Test: ${finding.title}`;
+}
+
+function hasActionableExperimentInputs(finding) {
+  return hasConcreteEvidence(finding) && hasProposedChange(finding) && hasPrimaryMetric(finding) && (['medium', 'high'].includes(finding.confidence) || finding.impact === 'high');
+}
+
+function hasConcreteEvidence(finding) {
+  const evidence = finding.evidence || [];
+  return evidence.some(item => /["“”]|#[\w-]+|\.|cta|bot[oó]n|label|form|input|color|px|\d/.test(String(item || '').toLowerCase()));
+}
+
+function hasProposedChange(finding) {
+  const text = `${finding.proposedChange || ''} ${finding.recommendation || ''} ${finding.rationale || ''} ${finding.title || ''}`.toLowerCase();
+  return /\b(probar|cambiar|mover|sustituir|añadir|eliminar|reordenar|definir|consolidar|fix|replace|test|cta primario|cta principal|primary cta)\b/.test(text);
+}
+
+function hasPrimaryMetric(finding) {
+  if (finding.primaryMetric) return true;
+  if (finding.metric) return true;
+  if (finding.affectedArea === 'where' || /cta/i.test(finding.title || '')) return true;
+  if (finding.type === 'design_system_debt') return true;
+  if (finding.type === 'accessibility_risk') return true;
+  return false;
+}
+
+function findingToReviewTask(finding) {
+  return {
+    question: reviewQuestionForFinding(finding),
+    evidence: finding.evidence?.length ? finding.evidence : [finding.rationale || 'Señal de baja confianza sin evidencia suficiente para experimento.'],
+    whyItMatters: reviewWhyForFinding(finding),
+    howToValidate: reviewValidationForFinding(finding),
+    owner: reviewOwnerForFinding(finding)
+  };
+}
+
+function blockToReviewTask(block) {
+  return {
+    question: reviewQuestionForBlock(block),
+    evidence: [...(block.evidence || []), ...(block.missing || [])].filter(Boolean),
+    whyItMatters: reviewWhyForBlock(block),
+    howToValidate: reviewValidationForBlock(block),
+    owner: reviewOwnerForBlock(block)
+  };
+}
+
+function reviewQuestionForFinding(finding) {
+  if (finding.affectedArea === 'where') return '¿La acción principal es visible, jerárquica y coherente con el objetivo real de la página?';
+  if (finding.affectedArea === 'who') return '¿El usuario objetivo está suficientemente identificado sin inventar un segmento?';
+  if (finding.affectedArea === 'how') return '¿La página explica qué ocurre después del CTA con suficiente precisión?';
+  return `¿La señal "${finding.title}" requiere una intervención concreta o solo seguimiento manual?`;
+}
+
+function reviewWhyForFinding(finding) {
+  if (finding.affectedArea === 'where') return 'Un CTA ambiguo puede dividir intención o medir clics que no representan progresión real.';
+  if (finding.affectedArea === 'who') return 'Una audiencia mal inferida puede llevar a copy demasiado específico o incorrecto.';
+  if (finding.affectedArea === 'how') return 'Sin expectativa post-CTA, el usuario puede percibir más esfuerzo o riesgo.';
+  return 'La señal no tiene todavía suficiente evidencia para convertirse en experimento.';
+}
+
+function reviewValidationForFinding(finding) {
+  if (finding.affectedArea === 'where') return 'Comprobar label, destino, jerarquía visual, eventos de clic y relación con el objetivo de negocio.';
+  if (finding.affectedArea === 'who') return 'Contrastar con briefing, tráfico esperado y lenguaje real del usuario antes de ajustar copy.';
+  if (finding.affectedArea === 'how') return 'Revisar flujo tras clic, alta, contratación, gestión, activación y mensajes de confirmación.';
+  return 'Recoger evidencia DOM/copy/analytics adicional y definir cambio + métrica antes de proponer hipótesis.';
+}
+
+function reviewOwnerForFinding(finding) {
+  if (finding.type === 'accessibility_risk') return 'dev';
+  if (finding.affectedArea === 'who' || finding.type === 'content_gap') return 'content';
+  if (finding.affectedArea === 'where') return 'design';
+  return 'product';
+}
+
+function reviewQuestionForBlock(block) {
+  if (block.block === 'who') return '¿El target funcional detectado equivale a un público objetivo suficiente para esta landing?';
+  if (block.block === 'how') return '¿La estructura de pasos explica también qué ocurre después del CTA?';
+  if (block.block === 'where') return '¿Hay un CTA primario claro en hero/main y su label coincide con el objetivo de la página?';
+  if (block.block === 'when') return '¿Existe un motivo temporal real para actuar ahora o solo límites de valor/cobertura?';
+  return `¿El bloque ${block.displayLabel || block.block} necesita una intervención concreta?`;
+}
+
+function reviewWhyForBlock(block) {
+  if (block.block === 'where') return 'Sin label/destino claro no hay base suficiente para diseñar una variante de CTA.';
+  if (block.block === 'how') return 'Una estructura de pasos puede ser útil, pero no garantiza claridad sobre contratación, alta o activación.';
+  if (block.block === 'who') return 'El target funcional ayuda a relevancia, pero puede no sustituir una persona o segmento comercial.';
+  if (block.block === 'when') return 'La urgencia artificial puede sesgar decisiones y dañar confianza.';
+  return 'Las señales parciales deben validarse antes de convertirse en hipótesis.';
+}
+
+function reviewValidationForBlock(block) {
+  if (block.block === 'where') return 'Registrar CTA candidates con label, destino, región, jerarquía y eventos antes de proponer test.';
+  if (block.block === 'how') return 'Validar con producto/contenido el flujo posterior al CTA: alta, contratación, gestión, activación y confirmación.';
+  if (block.block === 'who') return 'Comprobar si el caso de uso detectado aparece en briefing, campañas o segmentación de tráfico.';
+  if (block.block === 'when') return 'Separar límites de cobertura/precio de urgencia real basada en fechas o promoción verificable.';
+  return 'Definir evidencia concreta, cambio propuesto y métrica primaria.';
+}
+
+function reviewOwnerForBlock(block) {
+  if (block.block === 'who' || block.block === 'how') return 'content';
+  if (block.block === 'where') return 'design';
+  if (block.block === 'when') return 'product';
+  return 'product';
+}
+
+function dedupeTasks(tasks) {
+  const seen = new Set();
+  return tasks.filter(task => {
+    const key = task.question;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function becauseText(finding) {
@@ -2005,7 +2399,7 @@ function beliefText(finding, isDesignSystem) {
   if (finding.type === 'accessibility_risk') {
     return 'Fixing the accessibility risk will improve task completion without reducing comprehension or conversion.';
   }
-  return 'Resolving this finding should improve user comprehension, confidence, or task progression.';
+  return 'La intervención propuesta debe cambiar una señal observable ligada a la métrica primaria definida.';
 }
 
 function interventionText(finding, isDesignSystem, isManual) {
@@ -2096,6 +2490,20 @@ function compareFindingsForHypotheses(a, b) {
 
 
 // ---- src/behavioral-model.js ----
+
+const BEHAVIORAL_BLOCK_LABELS = {
+  what: 'Qué',
+  why: 'Por qué',
+  why_not: 'Por qué no',
+  who: 'Para quién',
+  how: 'Cómo',
+  where: 'Dónde actuar',
+  when: 'Cuándo / Urgencia'
+};
+
+function behavioralBlockDisplayLabel(block) {
+  return BEHAVIORAL_BLOCK_LABELS[block] || block || 'Bloque';
+}
 
 const BEHAVIORAL_BLOCKS = [
   {
@@ -2188,9 +2596,9 @@ const KEYWORD_SETS = {
   what: ['qué es', 'descubre', 'crea', 'convierte', 'gestiona', 'ahorra', 'mejora', 'optimiza', 'automatiza', 'solución'],
   why: ['beneficio', 'resultados', 'ahorra', 'reduce', 'aumenta', 'mejora', 'rápido', 'fácil', 'sin esfuerzo', 'más ventas', 'productividad'],
   why_not: ['garantía', 'seguro', 'seguridad', 'privacidad', 'cancelar', 'cancelación', 'sin permanencia', 'sin tarjeta', 'soporte', 'devolución', 'faq', 'preguntas frecuentes'],
-  who: ['para equipos', 'para empresas', 'para diseñadores', 'para desarrolladores', 'profesionales', 'agencias', 'pymes', 'startups', 'ecommerce', 'b2b'],
+  who: ['para equipos', 'para empresas', 'para diseñadores', 'para desarrolladores', 'para autónomos', 'para familias', 'para estudiantes', 'profesionales', 'agencias', 'pymes', 'startups', 'ecommerce', 'b2b'],
   how: ['cómo funciona', 'paso', 'empieza', 'proceso', 'en minutos', 'configura', 'instala', 'onboarding'],
-  when: ['hoy', 'ahora', 'limitado', 'últimas', 'plazas', 'hasta', 'solo', 'bono', 'descuento', 'disponible']
+  when: ['hoy', 'ahora', 'limitado', 'últimas', 'plazas', 'solo hoy', 'promoción', 'descuento']
 };
 
 function buildBehavioralMapping({ components, frictions }, root = document.body) {
@@ -2201,24 +2609,27 @@ function buildBehavioralMapping({ components, frictions }, root = document.body)
   return BEHAVIORAL_BLOCKS.map(block => {
     const blockFrictions = frictions.filter(friction => friction.block === block.key || friction.affectedBlocks?.includes(block.key));
     const evidence = buildBlockEvidence(block.key, signals, lowerText, components);
-    const present = getPresence(evidence.length, blockFrictions.length, block.key, components);
-    const quality = scoreBlockQuality(block.key, evidence.length, blockFrictions, components);
     const missing = getMissingSignals(block.key, signals, components);
+    const present = getPresence(evidence.length, blockFrictions.length, block.key, components, missing);
+    const quality = scoreBlockQuality(block.key, evidence.length, blockFrictions, components, missing);
 
     return {
       block: block.key,
       label: block.label,
+      displayLabel: behavioralBlockDisplayLabel(block.key),
       title: block.title,
       userQuestion: block.userQuestion,
       present,
       quality,
+      confidence: blockConfidenceFromEvidence(block.key, evidence, present, signals),
       evidence,
       missing,
       frictionType: block.frictionLabel,
       detectedFriction: blockFrictions[0]?.title || (missing[0] ? missing[0] : ''),
       severity: blockFrictions[0]?.severityScore || inferSeverityFromQuality(quality),
       recommendation: buildBlockRecommendation(block, present, missing),
-      metrics: block.metrics
+      metrics: block.metrics,
+      diagnostics: blockDiagnostics(block.key, signals)
     };
   });
 }
@@ -2238,7 +2649,8 @@ function buildBehavioralStructureRecommendation({ behavioralMapping, frictions }
 
     return {
       block: block.key,
-      sectionName: `${block.label} — ${block.title}`,
+      displayLabel: behavioralBlockDisplayLabel(block.key),
+      sectionName: `${behavioralBlockDisplayLabel(block.key)} (${block.key}) — ${block.title}`,
       objective: block.objective,
       userQuestionAnswered: block.userQuestion,
       primaryFrictionResolved: topFriction?.typeLabel || block.frictionLabel,
@@ -2279,6 +2691,11 @@ function collectBehavioralSignals(root, components, lowerText) {
   const hasForm = components.counts.forms > 0 || components.counts.inputs > 0;
   const hasNavigation = components.counts.navigation > 0;
   const hasCards = components.counts.cards >= 3;
+  const audience = inferAudienceSignal(lowerText);
+  const process = inferProcessSignal(lowerText, hasStepper);
+  const ctaCandidates = extractCtaCandidates(root, components);
+  const ctaAssessment = assessCtaClarity(ctaCandidates, lowerText);
+  const timing = inferTimingSignal(lowerText);
 
   return {
     headings,
@@ -2289,6 +2706,11 @@ function collectBehavioralSignals(root, components, lowerText) {
     hasForm,
     hasNavigation,
     hasCards,
+    audience,
+    process,
+    ctaCandidates,
+    ctaAssessment,
+    timing,
     keywordHits: Object.fromEntries(Object.entries(KEYWORD_SETS).map(([key, keywords]) => [key, keywords.filter(keyword => lowerText.includes(keyword))]))
   };
 }
@@ -2314,36 +2736,46 @@ function buildBlockEvidence(block, signals, lowerText, components) {
   }
 
   if (block === 'who') {
-    if (/para\s+(equipos|empresas|diseñadores|desarrolladores|agencias|profesionales|pymes|startups)/i.test(lowerText)) evidence.push('El contenido menciona un segmento objetivo explícito.');
+    if (signals.audience.type === 'explicit_persona') evidence.push(`Audiencia explícita detectada: “${signals.audience.match}”.`);
+    if (signals.audience.type === 'use_case_audience') evidence.push(`Target funcional detectado en caso de uso: “${signals.audience.match}”.`);
+    if (signals.audience.type === 'implicit_audience') evidence.push(`Audiencia implícita por contexto de producto: “${signals.audience.match}”.`);
   }
 
   if (block === 'how') {
-    if (signals.hasStepper) evidence.push('Se detecta estructura de pasos o proceso.');
+    if (signals.process.hasSteps) evidence.push('Se detecta estructura de pasos o proceso.');
+    if (signals.process.hasPostCtaExpectation) evidence.push(`Se anticipa qué ocurre después del CTA: “${signals.process.postCtaMatch}”.`);
     if (/cómo funciona|paso|empieza|configura/i.test(lowerText)) evidence.push('El contenido anticipa funcionamiento o inicio.');
   }
 
   if (block === 'where') {
-    if (components.counts.buttons > 0) evidence.push(`${components.counts.buttons} botón(es) o acciones detectadas.`);
+    if (signals.ctaAssessment.primary) {
+      evidence.push(`CTA principal visible en ${signals.ctaAssessment.primary.region}: “${signals.ctaAssessment.primary.label}” (${signals.ctaAssessment.primary.selector}).`);
+    }
+    if (signals.ctaAssessment.aligned) evidence.push(`El label del CTA parece alineado con el objetivo de página: “${signals.ctaAssessment.primary.label}”.`);
+    if (!signals.ctaAssessment.primary && components.counts.buttons > 0) evidence.push(`Solo hay conteo de acciones (${components.counts.buttons} botón(es)); falta evaluar un CTA primario claro.`);
     if (signals.hasForm) evidence.push('Se detecta formulario o campos de entrada.');
   }
 
   if (block === 'when') {
-    if (/hoy|ahora|limitado|últimas|hasta|disponible/i.test(lowerText)) evidence.push('Hay señales de momento, disponibilidad o incentivo temporal.');
+    if (signals.timing.urgency.length) evidence.push(`Urgencia o incentivo temporal detectado: ${signals.timing.urgency.slice(0, 3).join(', ')}.`);
+    if (signals.timing.valueCeilings.length) evidence.push(`“Hasta” aparece como límite de valor/cobertura, no como urgencia: ${signals.timing.valueCeilings.slice(0, 2).join(', ')}.`);
   }
 
   return evidence;
 }
 
-function getPresence(evidenceCount, frictionCount, block, components) {
+function getPresence(evidenceCount, frictionCount, block, components, missing = []) {
   if (block === 'where' && components.counts.buttons === 0 && components.counts.links === 0) return 'no';
+  if (block === 'how' && missing.length && evidenceCount >= 1) return 'parcial';
   if (evidenceCount >= 2 && frictionCount === 0) return 'sí';
   if (evidenceCount >= 1) return 'parcial';
   return 'no';
 }
 
-function scoreBlockQuality(block, evidenceCount, blockFrictions, components) {
+function scoreBlockQuality(block, evidenceCount, blockFrictions, components, missing = []) {
   let score = evidenceCount >= 2 ? 4 : evidenceCount === 1 ? 3 : 1;
   if (block === 'where' && components.counts.buttons === 0 && components.counts.links === 0) score = 1;
+  if (block === 'how' && missing.length && score > 3) score = 3;
   if (blockFrictions.some(friction => friction.priority === 'P0')) score -= 2;
   else if (blockFrictions.length) score -= 1;
   return Math.max(1, Math.min(5, score));
@@ -2364,10 +2796,13 @@ function getMissingSignals(block, signals, components) {
   if (!signals.ctas.length) missingByBlock.what.push('Falta un CTA visible conectado con el valor.');
   if (!signals.hasCards && !(signals.keywordHits.why || []).length) missingByBlock.why.push('Faltan beneficios traducidos a resultado para el usuario.');
   if (!signals.faqLike && !(signals.keywordHits.why_not || []).length) missingByBlock.why_not.push('No se observan respuestas explícitas a riesgo, condiciones o dudas críticas.');
-  if (!(signals.keywordHits.who || []).length) missingByBlock.who.push('El segmento objetivo no parece estar explícito.');
-  if (!signals.hasStepper && !(signals.keywordHits.how || []).length) missingByBlock.how.push('No se anticipa claramente cómo funciona o qué ocurre después.');
-  if (components.counts.buttons === 0 && components.counts.links === 0) missingByBlock.where.push('No se detecta una acción clara para avanzar.');
-  if (!(signals.keywordHits.when || []).length) missingByBlock.when.push('No se detecta un motivo legítimo para actuar ahora.');
+  if (signals.audience.type === 'missing') missingByBlock.who.push('No se detecta persona explícita ni target funcional en hero/main.');
+  if (signals.audience.type === 'use_case_audience') missingByBlock.who.push('Validar si el target funcional necesita traducirse a segmento comercial o perfil de usuario.');
+  if (signals.process.hasSteps && !signals.process.hasPostCtaExpectation) missingByBlock.how.push('Validar qué ocurre tras el CTA: alta, contratación, gestión, activación, tiempos y siguiente estado.');
+  else if (!signals.process.hasSteps && !(signals.keywordHits.how || []).length) missingByBlock.how.push('No se anticipa claramente cómo funciona o qué ocurre después.');
+  if (!signals.ctaAssessment.primary) missingByBlock.where.push(components.counts.buttons > 0 ? 'Hay acciones visibles, pero falta identificar un CTA primario claro en hero/main.' : 'No se detecta una acción clara para avanzar.');
+  else if (!signals.ctaAssessment.aligned) missingByBlock.where.push(`Validar si el CTA “${signals.ctaAssessment.primary.label}” expresa la acción esperada para el objetivo de la página.`);
+  if (!signals.timing.urgency.length) missingByBlock.when.push(signals.timing.valueCeilings.length ? 'No hay urgencia temporal: las ocurrencias de “hasta” parecen límites de valor/cobertura.' : 'No se detecta un motivo legítimo para actuar ahora.');
 
   return missingByBlock[block];
 }
@@ -2380,8 +2815,9 @@ function inferSeverityFromQuality(quality) {
 }
 
 function buildBlockRecommendation(block, present, missing) {
-  if (present === 'sí' && !missing.length) return `Mantener el bloque ${block.label} y validar su rendimiento con métricas de comportamiento.`;
-  return `Refuerza ${block.label} con ${block.recommendedPatterns.slice(0, 2).join(' + ')} para resolver: ${missing[0] || block.frictionLabel}.`;
+  const label = behavioralBlockDisplayLabel(block.key);
+  if (present === 'sí' && !missing.length) return `Mantener el bloque ${label} y validar su rendimiento con métricas de comportamiento.`;
+  return `Refuerza ${label} con ${block.recommendedPatterns.slice(0, 2).join(' + ')} para resolver: ${missing[0] || block.frictionLabel}.`;
 }
 
 function inferPriorityFromMapping(mapping) {
@@ -2463,6 +2899,157 @@ function getBlockRisks(block) {
     when: ['Caer en escasez falsa, urgencia artificial o presión manipulativa.']
   };
   return risks[block] || [];
+}
+
+function inferAudienceSignal(lowerText) {
+  const explicit = lowerText.match(/\bpara\s+(aut[oó]nomos|familias|estudiantes|equipos|empresas|diseñadores|desarrolladores|agencias|profesionales|pymes|startups|clientes|particulares)\b/i);
+  if (explicit) return { type: 'explicit_persona', match: compactText(explicit[0], 80) };
+
+  const useCase = lowerText.match(/\bpara\s+(?:tus?|su?s?|vuestros?)\s+(dispositivos?|m[oó]viles?|tablets?|smartwatches?|relojes?|viajes?|hogar|negocio|familia)\b|\bpara\s+(viajar|ahorrar(?:\s+en)?|proteger|asegurar|cuidar|gestionar|contratar)\b/i);
+  if (useCase) return { type: 'use_case_audience', match: compactText(useCase[0], 100) };
+
+  const implicit = lowerText.match(/\b(m[oó]vil|tablet|smartwatch|dispositivo|seguro|viaje|fibra|tarifa|cliente)\b/i);
+  if (implicit) return { type: 'implicit_audience', match: compactText(implicit[0], 80) };
+
+  return { type: 'missing', match: '' };
+}
+
+function inferProcessSignal(lowerText, hasStepper) {
+  const stepText = /\b(c[oó]mo funciona|paso\s+\d+|\d+\s*pasos?|proceso|empieza|configura|instala|onboarding)\b/i.test(lowerText);
+  const postCta = lowerText.match(/\b(despu[eé]s|al hacer clic|te llamamos|recibir[aá]s|alta|contrataci[oó]n|contratar|gesti[oó]n|gestionar|activaci[oó]n|activar|siguiente paso|en minutos)\b/i);
+  return {
+    hasSteps: Boolean(hasStepper || stepText),
+    hasPostCtaExpectation: Boolean(postCta),
+    postCtaMatch: postCta ? compactText(postCta[0], 80) : ''
+  };
+}
+
+function extractCtaCandidates(root, components) {
+  const elements = [
+    ...(components.raw?.buttons || []),
+    ...(components.raw?.links || [])
+  ];
+  const seen = new Set();
+
+  return elements
+    .filter(element => element && isVisibleElement(element))
+    .filter(element => {
+      if (seen.has(element)) return false;
+      seen.add(element);
+      return true;
+    })
+    .map(element => {
+      const rect = element.getBoundingClientRect?.() || {};
+      const label = getAccessibleName(element);
+      const region = root?.__contexticRegionFor?.(element) || inferRegionFromElement(element);
+      return {
+        label,
+        selector: describeElement(element),
+        href: element.getAttribute?.('href') || element.getAttribute?.('action') || '',
+        action: element.getAttribute?.('type') || element.getAttribute?.('data-action') || '',
+        region,
+        aboveTheFold: Number(rect.top) >= 0 && Number(rect.top) < (window.innerHeight || 900),
+        visualHierarchy: inferVisualHierarchy(element, rect),
+        componentType: inferCtaComponentType(element)
+      };
+    })
+    .filter(candidate => candidate.label)
+    .slice(0, 16);
+}
+
+function assessCtaClarity(candidates, lowerText) {
+  const primary = candidates.find(candidate => candidate.aboveTheFold && ['hero', 'main'].includes(candidate.region) && candidate.visualHierarchy === 'primary')
+    || candidates.find(candidate => ['hero', 'main'].includes(candidate.region) && candidate.visualHierarchy === 'primary')
+    || candidates.find(candidate => candidate.aboveTheFold && ['hero', 'main'].includes(candidate.region));
+  const aligned = primary ? isCtaLabelAligned(primary.label, lowerText) : false;
+  return { primary, aligned, candidates };
+}
+
+function isCtaLabelAligned(label, lowerText) {
+  const text = String(label || '').toLowerCase();
+  if (!text) return false;
+  if (/\b(acceso a mi seguro|contratar|solicitar|empezar|crear|calcular|comprar|activar|gestionar|contactar|pedir|alta|asegurar)\b/i.test(text)) return true;
+  if (/\bseguro|asegurar|protecci[oó]n|care|dispositivo|m[oó]vil|tablet|smartwatch\b/i.test(lowerText) && /\bseguro|asegurar|acceso|contratar|solicitar|activar|gestionar\b/i.test(text)) return true;
+  return false;
+}
+
+function inferTimingSignal(lowerText) {
+  const urgency = [];
+  const valueCeilings = [];
+  const urgencyPatterns = [
+    /\b(?:solo hoy|últimos días|ultimos dias|oferta limitada|tiempo limitado|plazas limitadas)\b/gi,
+    /\bpromoci[oó]n\b/gi,
+    /\bdescuento\s+hasta\s+(?:el\s+)?\d{1,2}(?:\/|-|\s+de\s+)[a-z0-9]+\b/gi,
+    /\bhasta\s+(?:el\s+)?\d{1,2}(?:\/|-|\s+de\s+)(?:\d{1,2}|[a-záéíóú]+)\b/gi
+  ];
+  const valuePatterns = [
+    /\bhasta\s+\d+(?:[.,]\d+)?\s*(?:€|eur|euros|gb|g\b|mb|%|por ciento)\b/gi,
+    /\bhasta\s+(?:\d+\s+)?(?:m[oó]viles?|tablets?|smartwatches?|dispositivos?|cobertura|reparaciones?|siniestros?)\b/gi
+  ];
+
+  for (const pattern of urgencyPatterns) urgency.push(...matchesFor(lowerText, pattern));
+  for (const pattern of valuePatterns) valueCeilings.push(...matchesFor(lowerText, pattern));
+
+  if (/\bahora\b/i.test(lowerText) && /\b(contrata|compra|solicita|empieza|activa)\b/i.test(lowerText)) urgency.push('ahora con acción explícita');
+
+  return {
+    urgency: Array.from(new Set(urgency)).slice(0, 6),
+    valueCeilings: Array.from(new Set(valueCeilings)).slice(0, 6)
+  };
+}
+
+function matchesFor(text, pattern) {
+  return Array.from(text.matchAll(pattern)).map(match => compactText(match[0], 80));
+}
+
+function blockConfidenceFromEvidence(block, evidence, present, signals) {
+  if (block === 'where' && !signals.ctaAssessment.primary && evidence.some(item => item.includes('Solo hay conteo'))) return 'low';
+  if (block === 'who' && ['use_case_audience', 'implicit_audience'].includes(signals.audience.type)) return 'medium';
+  if (block === 'when' && !signals.timing.urgency.length) return 'low';
+  if (present === 'sí' && evidence.length >= 2) return 'high';
+  if (present === 'parcial' || evidence.length) return 'medium';
+  return 'low';
+}
+
+function blockDiagnostics(block, signals) {
+  if (block === 'who') return { audienceType: signals.audience.type };
+  if (block === 'how') return { process: signals.process };
+  if (block === 'where') return { ctaCandidates: signals.ctaCandidates, ctaAssessment: signals.ctaAssessment };
+  if (block === 'when') return { timing: signals.timing };
+  return {};
+}
+
+function describeElement(element) {
+  const tag = element.tagName?.toLowerCase?.() || 'element';
+  const id = element.id ? `#${element.id}` : '';
+  const klass = Array.from(element.classList || []).slice(0, 2).map(item => `.${item}`).join('');
+  return `${tag}${id}${klass}`;
+}
+
+function inferRegionFromElement(element) {
+  const text = `${element.id || ''} ${Array.from(element.classList || []).join(' ')}`.toLowerCase();
+  if (/\b(hero|masthead|jumbotron)\b/.test(text)) return 'hero';
+  if (/\b(main|content|page-content)\b/.test(text)) return 'main';
+  if (/\b(header|nav|menu)\b/.test(text)) return 'nav';
+  return 'unknown';
+}
+
+function inferVisualHierarchy(element, rect = {}) {
+  const text = `${element.id || ''} ${Array.from(element.classList || []).join(' ')} ${element.getAttribute?.('role') || ''}`.toLowerCase();
+  if (/\b(primary|principal|cta|button--primary|btn-primary)\b/.test(text)) return 'primary';
+  const area = Number(rect.width || 0) * Number(rect.height || 0);
+  if (area >= 4200) return 'primary';
+  if (/\b(secondary|tertiary|link)\b/.test(text)) return 'secondary';
+  return 'unknown';
+}
+
+function inferCtaComponentType(element) {
+  const tag = element.tagName?.toLowerCase?.() || '';
+  const role = String(element.getAttribute?.('role') || '').toLowerCase();
+  if (tag === 'button' || role === 'button') return 'button';
+  if (tag === 'a') return 'link';
+  if (tag === 'input') return 'input';
+  return tag || 'unknown';
 }
 
 function getVisiblePageText(root) {
@@ -2646,7 +3233,8 @@ function buildContexticReport(snapshot = {}) {
   const frictions = snapshot.frictions || [];
   const behavioralRecommendation = snapshot.behavioralRecommendation || {};
   const findings = snapshot.findings || buildFindings(snapshot);
-  const hypotheses = snapshot.hypotheses || generateHypotheses(findings, pageClassification);
+  const hypotheses = snapshot.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping });
+  const reviewTasks = snapshot.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping });
 
   return {
     meta: {
@@ -2667,8 +3255,10 @@ function buildContexticReport(snapshot = {}) {
     scopeMap,
     detectedTokens: {
       colors: colors.colors || [],
+      systemHiddenVisualNoise: colors.systemHiddenVisualNoise || [],
       cssVariables: colors.cssVariables || [],
       typography: typography.typeStyles || [],
+      typographySystemHiddenVisualNoise: typography.systemHiddenVisualNoise || [],
       spacing: spacing.spacingScale || [],
       radius: spacing.radii || [],
       shadows: spacing.shadows || [],
@@ -2677,6 +3267,7 @@ function buildContexticReport(snapshot = {}) {
     detectedComponents: buildDetectedComponents(components),
     findings,
     hypotheses,
+    reviewTasks,
     behavioralMapping: normalizeBehavioralMapping(behavioralMapping),
     uxFrictions: frictions.map(normalizeFrictionForReport),
     implementationRules: buildImplementationRules(behavioralRecommendation),
@@ -2709,7 +3300,7 @@ function inferScreenType(components, behavioralMapping) {
     return {
       value: 'Landing con formulario o captación',
       evidenceType: 'inference',
-      evidence: ['Se detectan formularios y señales de acción Where.']
+      evidence: ['Se detectan formularios y señales de acción en Dónde actuar (where).']
     };
   }
   if (counts.buttons > 0) {
@@ -2740,7 +3331,7 @@ function getMainConversionRisk(frictions, behavioralMapping) {
   if (!weak) return 'unknown';
 
   return {
-    value: `Bloque ${weak.label || weak.block} débil o ausente`,
+    value: `Bloque ${weak.displayLabel || behavioralBlockDisplayLabel(weak.block)} (${weak.block}) débil o ausente`,
     evidenceType: 'inference',
     evidence: weak.missing?.length ? weak.missing : ['Inferido desde calidad/presencia del mapa behavioral.']
   };
@@ -2769,15 +3360,18 @@ function normalizeBehavioralMapping(behavioralMapping) {
   return Object.fromEntries(behavioralMapping.map(block => [block.block, {
     block: block.block,
     label: block.label,
+    displayLabel: block.displayLabel || behavioralBlockDisplayLabel(block.block),
     present: block.present,
     quality: block.quality,
+    confidence: block.confidence || 'unknown',
     evidence: block.evidence || [],
     missing: block.missing || [],
     frictionType: block.frictionType || 'unknown',
     detectedFriction: block.detectedFriction || '',
     severity: block.severity ?? null,
     recommendation: block.recommendation || '',
-    metrics: block.metrics || []
+    metrics: block.metrics || [],
+    diagnostics: block.diagnostics || {}
   }]));
 }
 
@@ -2849,7 +3443,8 @@ function buildDesignContextMarkdown(snapshot) {
   const pageClassification = report.pageClassification || {};
   const scopeMap = report.scopeMap || {};
   const findings = report.findings || [];
-  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification);
+  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping });
+  const reviewTasks = report.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping });
   const findingGroups = groupFindings(findings);
   const lowConfidenceFindings = findings.filter(finding => finding.confidence === 'low' || finding.priority === 'Review');
   const fullBehavioral = pageClassification.analysisMode === 'full_behavioral';
@@ -2886,7 +3481,7 @@ ${buildScopeExclusionList(scopeMap.excludedFromBehavioral)}
 
 ## Executive summary
 
-${buildExecutiveSummary({ findings, findingGroups, hypotheses, behavioralMapping, pageClassification })}
+${buildExecutiveSummary({ findings, findingGroups, hypotheses, reviewTasks, behavioralMapping, pageClassification })}
 
 ## Design system snapshot
 
@@ -2907,6 +3502,9 @@ ${buildDesignSystemTokenRows(spacing)}
 
 ### CSS variables detected
 ${buildCssVariableList(colors.cssVariables || [])}
+
+### System/hidden visual noise
+${buildSystemHiddenVisualNoise({ colors, typography, components })}
 
 ## Component inventory
 
@@ -2939,6 +3537,10 @@ ${buildFindingList(findingGroups.accessibility)}
 
 ${buildFindingList(lowConfidenceFindings)}
 
+## Review tasks
+
+${buildReviewTasks(reviewTasks)}
+
 ## Hypotheses and experiments
 
 ${buildHypothesisCards(hypotheses)}
@@ -2960,13 +3562,15 @@ ${buildWhatWorks(behavioralMapping)}
 ${buildHighConfidenceRisks(findings)}
 
 ### Manual review items
-${buildManualReviewSummary(findings, behavioralMapping)}
+${buildManualReviewSummary(reviewTasks)}
+
+### Top review task
+${buildTopReviewTask(reviewTasks)}
 
 ### Design system debt
 ${buildDesignSystemDebtSummary(findingGroups.designSystem)}
 
-### Top hypothesis
-${buildNextExperiment(hypotheses, behavioralMapping)}
+${buildTopHypothesisSection(hypotheses, behavioralMapping)}
 `;
 }
 
@@ -2980,9 +3584,10 @@ function buildGithubIssueExport(input = {}) {
   const pageClassification = report.pageClassification || {};
   const scopeMap = report.scopeMap || {};
   const findings = report.findings || [];
-  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification);
+  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping: Object.values(report.behavioralMapping || {}) });
+  const reviewTasks = report.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping: Object.values(report.behavioralMapping || {}) });
   const groups = groupFindings(findings);
-  const weakBlocks = Object.values(report.behavioralMapping || {}).filter(block => block.present !== 'sí' || block.quality <= 2);
+  const weakBlocks = Object.values(report.behavioralMapping || {}).filter(block => block.present === 'no' || block.quality <= 2);
   const title = `[Contextic] Review ${pageClassification.archetype || 'unknown'} findings for ${report.screenSummary?.pageTitle || 'untitled page'}`;
 
   return `# ${title}
@@ -2997,7 +3602,7 @@ ${pageClassification.analysisMode === 'snapshot_only' ? '- Note: analysis mode i
 
 ## Summary
 - UX frictions: ${groups.ux.length}
-- Weak blocks: ${weakBlocks.length}${weakBlocks.length ? ` (${weakBlocks.map(block => block.label || block.block).join(', ')})` : ''}
+- Bloques a revisar: ${weakBlocks.length}${weakBlocks.length ? ` (${weakBlocks.map(block => blockLabel(block)).join(', ')})` : ''}
 - DS risks: ${groups.designSystem.length}
 - Manual review items: ${groups.manualReview.length + findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review').length}
 
@@ -3006,6 +3611,9 @@ ${buildGithubTopFindings(findings)}
 
 ## Hypotheses
 ${buildGithubHypotheses(hypotheses)}
+
+## Review tasks
+${buildGithubReviewTasks(reviewTasks)}
 
 ## Implementation notes
 - Components affected: ${githubComponentsAffected(report.detectedComponents || [])}
@@ -3048,8 +3656,10 @@ function buildTokensSnapshot(snapshot) {
     behavioral: {
       bloques: behavioralMapping.map(block => ({
         bloque: block.block,
+        displayLabel: block.displayLabel || behavioralBlockDisplayLabel(block.block),
         presente: block.present,
         calidad: block.quality,
+        confianza: block.confidence || 'unknown',
         evidencia: block.evidence,
         faltante: block.missing,
         friccion: block.detectedFriction,
@@ -3110,10 +3720,23 @@ function buildCssVariableList(cssVariables = []) {
   if (!cssVariables.length) return '- No CSS variables detected in computed root styles.';
 
   return [
-    '| Variable | Value |',
-    '|---|---|',
-    ...cssVariables.slice(0, 16).map(variable => `| ${escapePipes(variable.name)} | ${escapePipes(variable.value)} |`)
+    '| Variable | Value | Usage |',
+    '|---|---|---|',
+    ...cssVariables.slice(0, 16).map(variable => `| ${escapePipes(variable.name)} | ${escapePipes(variable.value)} | ${escapePipes(variable.usageStatus || 'unknown usage')} |`)
   ].join('\n');
+}
+
+function buildSystemHiddenVisualNoise({ colors = {}, typography = {}, components = {} } = {}) {
+  const lines = [];
+  const noisyColors = colors.systemHiddenVisualNoise || [];
+  const noisyType = typography.systemHiddenVisualNoise || [];
+  const noisyComponents = Object.entries(components.systemHiddenComponents || {}).filter(([, value]) => count(value) > 0);
+
+  if (noisyColors.length) lines.push(`- Colors mostly in system/hidden contexts: ${noisyColors.slice(0, 5).map(item => `${item.value} (${item.count})`).join(', ')}.`);
+  if (noisyType.length) lines.push(`- Type styles mostly in system/hidden contexts: ${noisyType.slice(0, 3).map(item => `${item.value} (${item.count})`).join(', ')}.`);
+  if (noisyComponents.length) lines.push(`- Components excluded from primary inventory: ${noisyComponents.map(([name, value]) => `${name} ${value}`).join(', ')}.`);
+
+  return lines.join('\n') || '- No system/hidden visual noise dominated the visible snapshot.';
 }
 
 function buildComponentInventoryRows(components = {}) {
@@ -3205,7 +3828,7 @@ function buildScopeExclusionList(exclusions = []) {
   return exclusions.map(item => `- ${item.region}: ${item.reason}`).join('\n');
 }
 
-function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses = [], behavioralMapping = [], pageClassification = {} }) {
+function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses = [], reviewTasks = [], behavioralMapping = [], pageClassification = {} }) {
   const highConfidenceRisks = findings.filter(finding => finding.confidence === 'high' && ['P0', 'P1'].includes(finding.priority));
   const weakBlocks = getWeakBlocks(behavioralMapping);
   const topHypothesis = hypotheses[0];
@@ -3216,11 +3839,14 @@ function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses =
       ? `- High-confidence risks: ${highConfidenceRisks.map(finding => finding.title).slice(0, 3).join('; ')}.`
       : '- No se detectan fricciones UX de alta confianza.',
     weakBlocks.length
-      ? `- Weak blocks for manual review: ${weakBlocks.map(block => block.label).join(', ')}.`
-      : '- No weak behavioral blocks detected by current heuristics.',
+      ? `- Bloques behavioral para revisión manual: ${weakBlocks.map(block => blockLabel(block)).join(', ')}.`
+      : '- No se detectan bloques behavioral débiles con la heurística actual.',
     topHypothesis
       ? `- Top hypothesis: ${topHypothesis.id} ${topHypothesis.title}; primary metric: ${topHypothesis.metrics.primary}.`
-      : '- No measurable hypothesis generated.'
+      : '- No se generó hipótesis accionable con evidencia, cambio propuesto y métrica clara.',
+    reviewTasks[0]
+      ? `- Top review task: ${reviewTasks[0].question}`
+      : '- No review task generated.'
   ];
 
   return lines.join('\n');
@@ -3233,27 +3859,30 @@ function buildBehavioralAssessment({ fullBehavioral, behavioralMapping = [], pag
 - Treat any behavioral notes as manual review, not optimization instruction.`;
   }
 
-  return `### Behavioral block map
-| Block | Present | Quality | Evidence type | Evidence | Manual review note | Severity |
-|---|---|---:|---|---|---|---:|
+  return `### Mapa de bloques behavioral
+| Bloque | Key interna | Presencia | Calidad | Confianza | Evidencia específica | Nota de revisión manual | Severidad |
+|---|---|---|---:|---|---|---|---:|
 ${behavioralMapping.map(formatBehavioralAssessmentRow).join('\n')}
 
-### Weak blocks
+### Bloques a revisar
 ${buildWeakBlockList(behavioralMapping)}`;
 }
 
 function buildWeakBlockList(behavioralMapping = []) {
-  const weak = getWeakBlocks(behavioralMapping).map(block => `- ${block.label}: ${block.missing?.[0] || block.detectedFriction || 'Needs manual validation.'}`);
-  return weak.join('\n') || '- No weak blocks detected.';
+  const weak = getWeakBlocks(behavioralMapping).map(block => `- ${blockLabel(block)}: ${block.missing?.[0] || block.detectedFriction || 'Validar manualmente con evidencia de producto.'}`);
+  return weak.join('\n') || '- No se detectan bloques débiles.';
 }
 
 function getWeakBlocks(behavioralMapping = []) {
-  return behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2);
+  return behavioralMapping.filter(block => block.present === 'no' || block.quality <= 2);
+}
+
+function blockLabel(block = {}) {
+  return `${block.displayLabel || behavioralBlockDisplayLabel(block.block)}${block.block ? ` (${block.block})` : ''}`;
 }
 
 function formatBehavioralAssessmentRow(block) {
-  const evidenceType = block.evidence?.length ? 'observed/inferred from scoped DOM' : 'missing evidence';
-  return `| ${block.label} | ${block.present} | ${block.quality} | ${evidenceType} | ${escapePipes((block.evidence || []).slice(0, 2).join('; ') || 'Sin evidencia suficiente')} | ${escapePipes(block.detectedFriction || block.missing?.[0] || 'Sin fricción clara')} | ${block.severity} |`;
+  return `| ${blockLabel(block)} | ${block.block || ''} | ${block.present} | ${block.quality} | ${block.confidence || 'unknown'} | ${escapePipes((block.evidence || []).slice(0, 3).join('; ') || 'Sin evidencia suficiente')} | ${escapePipes(block.detectedFriction || block.missing?.[0] || 'Sin fricción clara')} | ${block.severity} |`;
 }
 
 function confidenceNote(confidence = 'low', fallback = '') {
@@ -3281,7 +3910,7 @@ function formatFinding(finding) {
 }
 
 function buildHypothesisCards(hypotheses = []) {
-  if (!hypotheses.length) return '- No se generaron hipótesis medibles.';
+  if (!hypotheses.length) return '- No se generaron hipótesis accionables. Revisa la sección “Review tasks”.';
   return hypotheses.map(formatHypothesisCard).join('\n\n');
 }
 
@@ -3297,6 +3926,16 @@ function formatHypothesisCard(hypothesis) {
 - Segments: ${hypothesis.segments.join(', ')}
 - Confidence/effort: ${hypothesis.confidence} · ${hypothesis.effort}
 - Experiment type: ${hypothesis.experimentType}`;
+}
+
+function buildReviewTasks(tasks = []) {
+  if (!tasks.length) return '- No hay tareas de revisión.';
+  return tasks.map(task => `### ${task.id}: ${task.question}
+- Question: ${task.question}
+- Evidence: ${(task.evidence || []).map(escapePipes).join('; ') || 'Sin evidencia automática fuerte.'}
+- Why it matters: ${task.whyItMatters}
+- How to validate: ${task.howToValidate}
+- Owner: ${task.owner}`).join('\n\n');
 }
 
 function isConversionGuidance(item = '') {
@@ -3320,6 +3959,14 @@ function buildGithubHypotheses(hypotheses = []) {
 - Then: ${hypothesis.then}
 - Primary metric: ${hypothesis.metrics.primary}
 - Guardrails: ${hypothesis.metrics.guardrail.join(', ')}`).join('\n\n');
+}
+
+function buildGithubReviewTasks(tasks = []) {
+  if (!tasks.length) return '- No review tasks generated.';
+  return tasks.slice(0, 5).map(task => `### ${task.id}: ${task.question}
+- Evidence: ${(task.evidence || [])[0] || 'No strong automatic evidence.'}
+- How to validate: ${task.howToValidate}
+- Owner: ${task.owner}`).join('\n\n');
 }
 
 function githubComponentsAffected(components = []) {
@@ -3636,28 +4283,45 @@ function getPrimaryActionLabel(components) {
 function getMainConversionRisk(frictions, behavioralMapping) {
   if (frictions[0]) return frictions[0].title;
   const weak = behavioralMapping.find(block => block.present === 'no' || block.quality <= 2);
-  return weak ? `Bloque ${weak.label} débil o ausente` : 'No detectado por heurística';
+  return weak ? `Bloque ${blockLabel(weak)} débil o ausente` : 'No detectado por heurística';
 }
 
 function buildStrategicReading(frictions, behavioralMapping) {
-  const weakBlocks = behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).map(block => block.label);
+  const weakBlocks = behavioralMapping.filter(block => block.present === 'no' || block.quality <= 2).map(blockLabel);
   const top = frictions[0];
   if (top) {
     return `La pantalla parece necesitar refuerzo en ${weakBlocks.slice(0, 3).join(', ') || 'su estructura behavioral'}. El principal riesgo detectado es “${top.title}”, que afecta a ${top.typeLabel || top.type}. Trata esta salida como hipótesis basada en DOM/CSS visible y valida con datos reales de comportamiento.`;
   }
-  return `La pantalla no muestra fricciones heurísticas fuertes, pero hay que validar manualmente la claridad de What, Why not y Where. Esta lectura separa observación técnica de recomendación para evitar conclusiones no evidenciadas.`;
+  return `La pantalla no muestra fricciones heurísticas fuertes, pero hay que validar manualmente la claridad de Qué (what), Por qué no (why_not) y Dónde actuar (where). Esta lectura separa observación técnica de recomendación para evitar conclusiones no evidenciadas.`;
 }
 
 function buildWhatWorks(behavioralMapping) {
-  const strong = behavioralMapping.filter(block => block.present === 'sí' && block.quality >= 4).map(block => `- ${block.label}: ${block.evidence[0] || 'bloque presente con señales suficientes'}`);
+  const strong = uniqueLines(behavioralMapping
+    .filter(block => block.present === 'sí' && block.quality >= 4)
+    .map(block => `- ${blockLabel(block)}: ${block.evidence[0] || 'bloque presente con señales suficientes'}`));
   return strong.join('\n') || '- No hay suficientes señales fuertes; conviene validar manualmente.';
 }
 
 function buildNextExperiment(hypotheses, behavioralMapping) {
   const top = hypotheses[0];
   if (top) return `${top.id}: ${top.title}. ${top.ifWe} Medir ${top.metrics.primary}; guardrails: ${top.metrics.guardrail.join(', ')}. Tipo: ${top.experimentType}.`;
-  const weak = behavioralMapping.find(block => block.present === 'no' || block.quality <= 2);
-  return weak ? `Use the current page as baseline and validate ${weak.label} before changing the experience.` : 'Use the current page as baseline and validate the next measurable question before changing the experience.';
+  return 'No hay hipótesis accionable con evidencia, cambio propuesto y métrica clara.';
+}
+
+function buildTopHypothesisSection(hypotheses, behavioralMapping) {
+  if (!hypotheses.length) return '';
+  return `### Top hypothesis
+${buildNextExperiment(hypotheses, behavioralMapping)}`;
+}
+
+function buildTopReviewTask(tasks = []) {
+  const top = tasks[0];
+  if (!top) return '- No hay tareas de revisión.';
+  return `- Question: ${top.question}
+- Evidence: ${(top.evidence || []).map(escapePipes).join('; ') || 'Sin evidencia automática fuerte.'}
+- Why it matters: ${top.whyItMatters}
+- How to validate: ${top.howToValidate}
+- Owner: ${top.owner}`;
 }
 
 function buildHighConfidenceRisks(findings = []) {
@@ -3667,13 +4331,9 @@ function buildHighConfidenceRisks(findings = []) {
   return risks.join('\n') || '- No se detectan fricciones UX de alta confianza.';
 }
 
-function buildManualReviewSummary(findings = [], behavioralMapping = []) {
-  const reviewFindings = findings
-    .filter(finding => finding.priority === 'Review' || finding.confidence === 'low')
-    .map(finding => `- ${finding.title}: ${finding.rationale}`);
-  const weakBlocks = getWeakBlocks(behavioralMapping)
-    .map(block => `- Weak block ${block.label}: ${block.missing?.[0] || 'needs manual review'}`);
-  return [...reviewFindings, ...weakBlocks].join('\n') || '- No manual review items detected beyond normal QA.';
+function buildManualReviewSummary(reviewTasks = []) {
+  const items = uniqueReviewTasks(reviewTasks).map(task => `- [${reviewTaskTag(task)}] ${reviewTaskSummary(task)}`);
+  return items.join('\n') || '- No hay elementos de revisión manual más allá del QA normal.';
 }
 
 function buildDesignSystemDebtSummary(findings = []) {
@@ -3692,6 +4352,7 @@ function buildRecommendedMetrics(hypotheses = []) {
     for (const metric of hypothesis.metrics?.secondary || []) secondary.add(metric);
     for (const metric of hypothesis.metrics?.guardrail || []) guardrail.add(metric);
   }
+  for (const metric of primary) secondary.delete(metric);
 
   return [
     '### Primary',
@@ -3703,6 +4364,39 @@ function buildRecommendedMetrics(hypotheses = []) {
     '### Guardrails',
     ...(guardrail.size ? Array.from(guardrail).map(metric => `- ${metric}`) : ['- no accessibility regressions'])
   ].join('\n');
+}
+
+function uniqueReviewTasks(tasks = []) {
+  const seen = new Set();
+  return tasks.filter(task => {
+    const key = `${reviewTaskTag(task)}:${reviewTaskSummary(task)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function reviewTaskTag(task = {}) {
+  const text = `${task.question || ''} ${(task.evidence || []).join(' ')}`.toLowerCase();
+  if (/target|audiencia|perfil|dispositivo|para qui[eé]n/.test(text)) return 'Who';
+  if (/proceso|pasos|despu[eé]s|cta|alta|contrataci[oó]n|gesti[oó]n|activaci[oó]n/.test(text) && !/cta principal|label|jerarqu/i.test(text)) return 'How';
+  if (/cta principal|label|jerarqu|objetivo de negocio|dónde actuar/.test(text)) return 'Where';
+  if (/urgencia|temporal|hasta|cobertura/.test(text)) return 'When';
+  return 'Review';
+}
+
+function reviewTaskSummary(task = {}) {
+  const question = task.question || '';
+  const tag = reviewTaskTag(task);
+  if (tag === 'Who') return 'Validar si el target funcional por dispositivo es suficiente o necesita perfil explícito.';
+  if (tag === 'How') return 'Validar si el proceso explica qué ocurre después del CTA.';
+  if (tag === 'Where') return 'Validar si el CTA principal responde al objetivo de negocio.';
+  if (tag === 'When') return 'Validar si existe urgencia real o solo límites de valor/cobertura.';
+  return question || 'Validar la señal antes de proponer cambios.';
+}
+
+function uniqueLines(lines = []) {
+  return Array.from(new Set(lines.filter(Boolean)));
 }
 
 function translateImpact(value) {
@@ -3751,7 +4445,8 @@ function createSnapshot() {
   const behavioralMapping = fullBehavioral ? buildBehavioralMapping({ components: behavioralComponents, frictions }, scopeMap.behavioralRoot) : [];
   const behavioralRecommendation = fullBehavioral ? buildBehavioralStructureRecommendation({ behavioralMapping, frictions }) : { sections: [] };
   const findings = buildFindings({ frictions, behavioralMapping });
-  const hypotheses = generateHypotheses(findings, pageClassification);
+  const hypotheses = generateHypotheses(findings, pageClassification, { behavioralMapping });
+  const reviewTasks = generateReviewTasks(findings, pageClassification, { behavioralMapping });
 
   return {
     meta: {
@@ -3776,6 +4471,7 @@ function createSnapshot() {
     frictions,
     findings,
     hypotheses,
+    reviewTasks,
     behavioralMapping,
     behavioralRecommendation
   };
@@ -4183,7 +4879,7 @@ function renderPanel(snapshot) {
     'aria-label': 'Cerrar panel'
   }, ['×']);
 
-  const weakBlocksCount = snapshot.behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).length;
+  const weakBlocksCount = snapshot.behavioralMapping.filter(block => block.present === 'no' || block.quality <= 2).length;
   const classification = snapshot.pageClassification || {};
   const findings = snapshot.findings || [];
   const findingGroups = groupFindings(findings);
@@ -4213,10 +4909,10 @@ function renderPanel(snapshot) {
   ]);
 
   const grid = element('div', { class: 'grid' }, [
-    metric('UX frictions', uxFrictionCount),
-    metric('Weak blocks', weakBlocksCount),
-    metric('DS risks', dsRiskCount),
-    metric('Manual review', manualReviewCount)
+    metric('Fricciones UX', uxFrictionCount),
+    metric('Bloques a revisar', weakBlocksCount),
+    metric('Riesgos DS', dsRiskCount),
+    metric('Revisión manual', manualReviewCount)
   ]);
 
   const swatches = element('div', { class: 'swatches' });
@@ -4235,14 +4931,14 @@ function renderPanel(snapshot) {
 
   const mappingRows = snapshot.behavioralMapping.map(block => element('div', { class: 'mapping-row' }, [
     element('div', { class: 'mapping-copy' }, [
-      element('strong', {}, [block.label]),
+      element('strong', {}, [block.displayLabel || behavioralBlockDisplayLabel(block.block)]),
       element('div', { class: 'mapping-meta' }, [
         element('span', { class: 'pill' }, [presenceLabel(block.present)]),
-        element('span', { class: 'pill' }, [`score ${block.quality}/5`]),
-        element('span', { class: 'pill' }, [blockConfidence(block)])
+        element('span', { class: 'pill' }, [`calidad ${block.quality}/5`]),
+        element('span', { class: 'pill' }, [confidenceLabel(block.confidence || blockConfidence(block))])
       ])
     ]),
-    element('span', { class: 'pill' }, [block.block])
+    element('span', { class: 'pill' }, [block.title || 'bloque'])
   ]));
 
   const topFindingNodes = topFindingsByType(findingGroups, findings).map(item => element('div', { class: `friction ${severityClass(item.finding.severity)}` }, [
@@ -4254,7 +4950,7 @@ function renderPanel(snapshot) {
       ]),
       element('span', { class: 'pill' }, [item.finding.priority])
     ]),
-    element('p', {}, [`${item.finding.confidence} confidence · ${item.finding.rationale}`])
+    element('p', {}, [`${confidenceLabel(item.finding.confidence)} · ${item.finding.rationale}`])
   ]));
 
   const body = element('div', { class: 'body' }, [
@@ -4271,7 +4967,7 @@ function renderPanel(snapshot) {
       element('h3', { class: 'section-title' }, ['Componentes']),
       element('div', { class: 'component-line' }, [
         element('span', {}, [componentSummary]),
-        element('span', { class: 'pill' }, [`${snapshot.components.counts.ctaGroups} CTA groups`])
+        element('span', { class: 'pill' }, [`${snapshot.components.counts.ctaGroups} grupos CTA`])
       ])
     ]),
     element('section', { class: 'section' }, [
@@ -4290,15 +4986,15 @@ function renderPanel(snapshot) {
     element('section', { class: 'section' }, [
       element('h3', { class: 'section-title' }, ['Lente conductual']),
       ...(classification.analysisMode === 'full_behavioral' ? [
-        element('p', { class: 'notice' }, [uxFrictionCount ? 'Hay fricciones UX de alta confianza; revisar hypothesis cards antes de actuar.' : 'No se detectan fricciones UX de alta confianza. Los weak blocks son revisión, no bloqueo crítico.'])
+        element('p', { class: 'notice' }, [uxFrictionCount ? 'Hay fricciones UX de alta confianza; revisar tarjetas de hipótesis antes de actuar.' : 'No se detectan fricciones UX de alta confianza. Los bloques a revisar son revisión, no bloqueo crítico.'])
       ] : [
         element('p', { class: 'notice' }, ['Salida acotada a snapshot, inventario, accesibilidad y notas manuales.'])
       ])
     ]),
     element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Top findings']),
+      element('h3', { class: 'section-title' }, ['Hallazgos principales']),
       ...(topFindingNodes.length ? [element('div', { class: 'top-findings' }, topFindingNodes)] : [
-        element('p', { class: 'notice' }, ['No hay findings priorizados. Revisa el markdown para baseline y notas manuales.'])
+        element('p', { class: 'notice' }, ['No hay hallazgos priorizados. Revisa el markdown para baseline y notas manuales.'])
       ])
     ])
   ]);
@@ -4306,7 +5002,7 @@ function renderPanel(snapshot) {
   const copyButtons = [
     element('button', { class: 'copy primary', type: 'button', 'data-copy': 'design' }, ['Copiar design-context.md']),
     element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'json' }, ['Copiar JSON']),
-    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'issue' }, ['Copiar GitHub Issue'])
+    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'issue' }, ['Copiar issue GitHub'])
   ];
 
   const copyStatus = element('p', { class: 'notice', 'data-copy-status': '' }, [
@@ -4318,7 +5014,7 @@ function renderPanel(snapshot) {
       element('div', { class: 'brand' }, [
         element('span', { class: 'brand-mark' }, ['C']),
         element('div', {}, [
-          element('p', { class: 'kicker' }, ['Design context']),
+          element('p', { class: 'kicker' }, ['Contexto de diseño']),
           element('h2', { id: 'contextic-title' }, ['Contextic']),
           element('p', { class: 'subtitle' }, ['Evidencia, confianza e hipótesis listas para handoff.'])
         ])
@@ -4365,10 +5061,18 @@ function metric(label, value) {
 }
 
 function presenceLabel(value = '') {
-  if (value === 'sí') return 'present';
-  if (value === 'parcial') return 'partial';
-  if (value === 'no') return 'missing';
-  return value || 'unknown';
+  if (value === 'sí') return 'presente';
+  if (value === 'parcial') return 'parcial';
+  if (value === 'no') return 'ausente';
+  return value || 'desconocido';
+}
+
+function confidenceLabel(value = '') {
+  const normalized = String(value || '').toLowerCase();
+  if (normalized === 'high' || normalized === 'alta') return 'confianza alta';
+  if (normalized === 'medium' || normalized === 'media') return 'confianza media';
+  if (normalized === 'low' || normalized === 'baja') return 'confianza baja';
+  return 'confianza desconocida';
 }
 
 function blockConfidence(block = {}) {
@@ -4381,8 +5085,8 @@ function topFindingsByType(groups = {}, findings = []) {
   const buckets = [
     ['UX', groups.ux || []],
     ['DS', groups.designSystem || []],
-    ['Accessibility', groups.accessibility || []],
-    ['Review', [...(groups.manualReview || []), ...findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review')]]
+    ['Accesibilidad', groups.accessibility || []],
+    ['Revisión', [...(groups.manualReview || []), ...findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review')]]
   ];
   const items = [];
 

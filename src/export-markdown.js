@@ -1,6 +1,7 @@
 import { buildContexticReport } from './contextic-report.js';
 import { groupFindings } from './findings-prioritization.js';
-import { generateHypotheses } from './hypotheses.js';
+import { generateHypotheses, generateReviewTasks } from './hypotheses.js';
+import { behavioralBlockDisplayLabel } from './behavioral-model.js';
 
 export function buildDesignContextMarkdown(snapshot) {
   const meta = snapshot.meta || {};
@@ -13,7 +14,8 @@ export function buildDesignContextMarkdown(snapshot) {
   const pageClassification = report.pageClassification || {};
   const scopeMap = report.scopeMap || {};
   const findings = report.findings || [];
-  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification);
+  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping });
+  const reviewTasks = report.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping });
   const findingGroups = groupFindings(findings);
   const lowConfidenceFindings = findings.filter(finding => finding.confidence === 'low' || finding.priority === 'Review');
   const fullBehavioral = pageClassification.analysisMode === 'full_behavioral';
@@ -50,7 +52,7 @@ ${buildScopeExclusionList(scopeMap.excludedFromBehavioral)}
 
 ## Executive summary
 
-${buildExecutiveSummary({ findings, findingGroups, hypotheses, behavioralMapping, pageClassification })}
+${buildExecutiveSummary({ findings, findingGroups, hypotheses, reviewTasks, behavioralMapping, pageClassification })}
 
 ## Design system snapshot
 
@@ -71,6 +73,9 @@ ${buildDesignSystemTokenRows(spacing)}
 
 ### CSS variables detected
 ${buildCssVariableList(colors.cssVariables || [])}
+
+### System/hidden visual noise
+${buildSystemHiddenVisualNoise({ colors, typography, components })}
 
 ## Component inventory
 
@@ -103,6 +108,10 @@ ${buildFindingList(findingGroups.accessibility)}
 
 ${buildFindingList(lowConfidenceFindings)}
 
+## Review tasks
+
+${buildReviewTasks(reviewTasks)}
+
 ## Hypotheses and experiments
 
 ${buildHypothesisCards(hypotheses)}
@@ -124,13 +133,15 @@ ${buildWhatWorks(behavioralMapping)}
 ${buildHighConfidenceRisks(findings)}
 
 ### Manual review items
-${buildManualReviewSummary(findings, behavioralMapping)}
+${buildManualReviewSummary(reviewTasks)}
+
+### Top review task
+${buildTopReviewTask(reviewTasks)}
 
 ### Design system debt
 ${buildDesignSystemDebtSummary(findingGroups.designSystem)}
 
-### Top hypothesis
-${buildNextExperiment(hypotheses, behavioralMapping)}
+${buildTopHypothesisSection(hypotheses, behavioralMapping)}
 `;
 }
 
@@ -144,9 +155,10 @@ export function buildGithubIssueExport(input = {}) {
   const pageClassification = report.pageClassification || {};
   const scopeMap = report.scopeMap || {};
   const findings = report.findings || [];
-  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification);
+  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping: Object.values(report.behavioralMapping || {}) });
+  const reviewTasks = report.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping: Object.values(report.behavioralMapping || {}) });
   const groups = groupFindings(findings);
-  const weakBlocks = Object.values(report.behavioralMapping || {}).filter(block => block.present !== 'sí' || block.quality <= 2);
+  const weakBlocks = Object.values(report.behavioralMapping || {}).filter(block => block.present === 'no' || block.quality <= 2);
   const title = `[Contextic] Review ${pageClassification.archetype || 'unknown'} findings for ${report.screenSummary?.pageTitle || 'untitled page'}`;
 
   return `# ${title}
@@ -161,7 +173,7 @@ ${pageClassification.analysisMode === 'snapshot_only' ? '- Note: analysis mode i
 
 ## Summary
 - UX frictions: ${groups.ux.length}
-- Weak blocks: ${weakBlocks.length}${weakBlocks.length ? ` (${weakBlocks.map(block => block.label || block.block).join(', ')})` : ''}
+- Bloques a revisar: ${weakBlocks.length}${weakBlocks.length ? ` (${weakBlocks.map(block => blockLabel(block)).join(', ')})` : ''}
 - DS risks: ${groups.designSystem.length}
 - Manual review items: ${groups.manualReview.length + findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review').length}
 
@@ -170,6 +182,9 @@ ${buildGithubTopFindings(findings)}
 
 ## Hypotheses
 ${buildGithubHypotheses(hypotheses)}
+
+## Review tasks
+${buildGithubReviewTasks(reviewTasks)}
 
 ## Implementation notes
 - Components affected: ${githubComponentsAffected(report.detectedComponents || [])}
@@ -212,8 +227,10 @@ export function buildTokensSnapshot(snapshot) {
     behavioral: {
       bloques: behavioralMapping.map(block => ({
         bloque: block.block,
+        displayLabel: block.displayLabel || behavioralBlockDisplayLabel(block.block),
         presente: block.present,
         calidad: block.quality,
+        confianza: block.confidence || 'unknown',
         evidencia: block.evidence,
         faltante: block.missing,
         friccion: block.detectedFriction,
@@ -274,10 +291,23 @@ function buildCssVariableList(cssVariables = []) {
   if (!cssVariables.length) return '- No CSS variables detected in computed root styles.';
 
   return [
-    '| Variable | Value |',
-    '|---|---|',
-    ...cssVariables.slice(0, 16).map(variable => `| ${escapePipes(variable.name)} | ${escapePipes(variable.value)} |`)
+    '| Variable | Value | Usage |',
+    '|---|---|---|',
+    ...cssVariables.slice(0, 16).map(variable => `| ${escapePipes(variable.name)} | ${escapePipes(variable.value)} | ${escapePipes(variable.usageStatus || 'unknown usage')} |`)
   ].join('\n');
+}
+
+function buildSystemHiddenVisualNoise({ colors = {}, typography = {}, components = {} } = {}) {
+  const lines = [];
+  const noisyColors = colors.systemHiddenVisualNoise || [];
+  const noisyType = typography.systemHiddenVisualNoise || [];
+  const noisyComponents = Object.entries(components.systemHiddenComponents || {}).filter(([, value]) => count(value) > 0);
+
+  if (noisyColors.length) lines.push(`- Colors mostly in system/hidden contexts: ${noisyColors.slice(0, 5).map(item => `${item.value} (${item.count})`).join(', ')}.`);
+  if (noisyType.length) lines.push(`- Type styles mostly in system/hidden contexts: ${noisyType.slice(0, 3).map(item => `${item.value} (${item.count})`).join(', ')}.`);
+  if (noisyComponents.length) lines.push(`- Components excluded from primary inventory: ${noisyComponents.map(([name, value]) => `${name} ${value}`).join(', ')}.`);
+
+  return lines.join('\n') || '- No system/hidden visual noise dominated the visible snapshot.';
 }
 
 function buildComponentInventoryRows(components = {}) {
@@ -369,7 +399,7 @@ function buildScopeExclusionList(exclusions = []) {
   return exclusions.map(item => `- ${item.region}: ${item.reason}`).join('\n');
 }
 
-function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses = [], behavioralMapping = [], pageClassification = {} }) {
+function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses = [], reviewTasks = [], behavioralMapping = [], pageClassification = {} }) {
   const highConfidenceRisks = findings.filter(finding => finding.confidence === 'high' && ['P0', 'P1'].includes(finding.priority));
   const weakBlocks = getWeakBlocks(behavioralMapping);
   const topHypothesis = hypotheses[0];
@@ -380,11 +410,14 @@ function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses =
       ? `- High-confidence risks: ${highConfidenceRisks.map(finding => finding.title).slice(0, 3).join('; ')}.`
       : '- No se detectan fricciones UX de alta confianza.',
     weakBlocks.length
-      ? `- Weak blocks for manual review: ${weakBlocks.map(block => block.label).join(', ')}.`
-      : '- No weak behavioral blocks detected by current heuristics.',
+      ? `- Bloques behavioral para revisión manual: ${weakBlocks.map(block => blockLabel(block)).join(', ')}.`
+      : '- No se detectan bloques behavioral débiles con la heurística actual.',
     topHypothesis
       ? `- Top hypothesis: ${topHypothesis.id} ${topHypothesis.title}; primary metric: ${topHypothesis.metrics.primary}.`
-      : '- No measurable hypothesis generated.'
+      : '- No se generó hipótesis accionable con evidencia, cambio propuesto y métrica clara.',
+    reviewTasks[0]
+      ? `- Top review task: ${reviewTasks[0].question}`
+      : '- No review task generated.'
   ];
 
   return lines.join('\n');
@@ -397,27 +430,30 @@ function buildBehavioralAssessment({ fullBehavioral, behavioralMapping = [], pag
 - Treat any behavioral notes as manual review, not optimization instruction.`;
   }
 
-  return `### Behavioral block map
-| Block | Present | Quality | Evidence type | Evidence | Manual review note | Severity |
-|---|---|---:|---|---|---|---:|
+  return `### Mapa de bloques behavioral
+| Bloque | Key interna | Presencia | Calidad | Confianza | Evidencia específica | Nota de revisión manual | Severidad |
+|---|---|---|---:|---|---|---|---:|
 ${behavioralMapping.map(formatBehavioralAssessmentRow).join('\n')}
 
-### Weak blocks
+### Bloques a revisar
 ${buildWeakBlockList(behavioralMapping)}`;
 }
 
 function buildWeakBlockList(behavioralMapping = []) {
-  const weak = getWeakBlocks(behavioralMapping).map(block => `- ${block.label}: ${block.missing?.[0] || block.detectedFriction || 'Needs manual validation.'}`);
-  return weak.join('\n') || '- No weak blocks detected.';
+  const weak = getWeakBlocks(behavioralMapping).map(block => `- ${blockLabel(block)}: ${block.missing?.[0] || block.detectedFriction || 'Validar manualmente con evidencia de producto.'}`);
+  return weak.join('\n') || '- No se detectan bloques débiles.';
 }
 
 function getWeakBlocks(behavioralMapping = []) {
-  return behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2);
+  return behavioralMapping.filter(block => block.present === 'no' || block.quality <= 2);
+}
+
+function blockLabel(block = {}) {
+  return `${block.displayLabel || behavioralBlockDisplayLabel(block.block)}${block.block ? ` (${block.block})` : ''}`;
 }
 
 function formatBehavioralAssessmentRow(block) {
-  const evidenceType = block.evidence?.length ? 'observed/inferred from scoped DOM' : 'missing evidence';
-  return `| ${block.label} | ${block.present} | ${block.quality} | ${evidenceType} | ${escapePipes((block.evidence || []).slice(0, 2).join('; ') || 'Sin evidencia suficiente')} | ${escapePipes(block.detectedFriction || block.missing?.[0] || 'Sin fricción clara')} | ${block.severity} |`;
+  return `| ${blockLabel(block)} | ${block.block || ''} | ${block.present} | ${block.quality} | ${block.confidence || 'unknown'} | ${escapePipes((block.evidence || []).slice(0, 3).join('; ') || 'Sin evidencia suficiente')} | ${escapePipes(block.detectedFriction || block.missing?.[0] || 'Sin fricción clara')} | ${block.severity} |`;
 }
 
 function confidenceNote(confidence = 'low', fallback = '') {
@@ -445,7 +481,7 @@ function formatFinding(finding) {
 }
 
 function buildHypothesisCards(hypotheses = []) {
-  if (!hypotheses.length) return '- No se generaron hipótesis medibles.';
+  if (!hypotheses.length) return '- No se generaron hipótesis accionables. Revisa la sección “Review tasks”.';
   return hypotheses.map(formatHypothesisCard).join('\n\n');
 }
 
@@ -461,6 +497,16 @@ function formatHypothesisCard(hypothesis) {
 - Segments: ${hypothesis.segments.join(', ')}
 - Confidence/effort: ${hypothesis.confidence} · ${hypothesis.effort}
 - Experiment type: ${hypothesis.experimentType}`;
+}
+
+function buildReviewTasks(tasks = []) {
+  if (!tasks.length) return '- No hay tareas de revisión.';
+  return tasks.map(task => `### ${task.id}: ${task.question}
+- Question: ${task.question}
+- Evidence: ${(task.evidence || []).map(escapePipes).join('; ') || 'Sin evidencia automática fuerte.'}
+- Why it matters: ${task.whyItMatters}
+- How to validate: ${task.howToValidate}
+- Owner: ${task.owner}`).join('\n\n');
 }
 
 function isConversionGuidance(item = '') {
@@ -484,6 +530,14 @@ function buildGithubHypotheses(hypotheses = []) {
 - Then: ${hypothesis.then}
 - Primary metric: ${hypothesis.metrics.primary}
 - Guardrails: ${hypothesis.metrics.guardrail.join(', ')}`).join('\n\n');
+}
+
+function buildGithubReviewTasks(tasks = []) {
+  if (!tasks.length) return '- No review tasks generated.';
+  return tasks.slice(0, 5).map(task => `### ${task.id}: ${task.question}
+- Evidence: ${(task.evidence || [])[0] || 'No strong automatic evidence.'}
+- How to validate: ${task.howToValidate}
+- Owner: ${task.owner}`).join('\n\n');
 }
 
 function githubComponentsAffected(components = []) {
@@ -800,28 +854,45 @@ function getPrimaryActionLabel(components) {
 function getMainConversionRisk(frictions, behavioralMapping) {
   if (frictions[0]) return frictions[0].title;
   const weak = behavioralMapping.find(block => block.present === 'no' || block.quality <= 2);
-  return weak ? `Bloque ${weak.label} débil o ausente` : 'No detectado por heurística';
+  return weak ? `Bloque ${blockLabel(weak)} débil o ausente` : 'No detectado por heurística';
 }
 
 function buildStrategicReading(frictions, behavioralMapping) {
-  const weakBlocks = behavioralMapping.filter(block => block.present !== 'sí' || block.quality <= 2).map(block => block.label);
+  const weakBlocks = behavioralMapping.filter(block => block.present === 'no' || block.quality <= 2).map(blockLabel);
   const top = frictions[0];
   if (top) {
     return `La pantalla parece necesitar refuerzo en ${weakBlocks.slice(0, 3).join(', ') || 'su estructura behavioral'}. El principal riesgo detectado es “${top.title}”, que afecta a ${top.typeLabel || top.type}. Trata esta salida como hipótesis basada en DOM/CSS visible y valida con datos reales de comportamiento.`;
   }
-  return `La pantalla no muestra fricciones heurísticas fuertes, pero hay que validar manualmente la claridad de What, Why not y Where. Esta lectura separa observación técnica de recomendación para evitar conclusiones no evidenciadas.`;
+  return `La pantalla no muestra fricciones heurísticas fuertes, pero hay que validar manualmente la claridad de Qué (what), Por qué no (why_not) y Dónde actuar (where). Esta lectura separa observación técnica de recomendación para evitar conclusiones no evidenciadas.`;
 }
 
 function buildWhatWorks(behavioralMapping) {
-  const strong = behavioralMapping.filter(block => block.present === 'sí' && block.quality >= 4).map(block => `- ${block.label}: ${block.evidence[0] || 'bloque presente con señales suficientes'}`);
+  const strong = uniqueLines(behavioralMapping
+    .filter(block => block.present === 'sí' && block.quality >= 4)
+    .map(block => `- ${blockLabel(block)}: ${block.evidence[0] || 'bloque presente con señales suficientes'}`));
   return strong.join('\n') || '- No hay suficientes señales fuertes; conviene validar manualmente.';
 }
 
 function buildNextExperiment(hypotheses, behavioralMapping) {
   const top = hypotheses[0];
   if (top) return `${top.id}: ${top.title}. ${top.ifWe} Medir ${top.metrics.primary}; guardrails: ${top.metrics.guardrail.join(', ')}. Tipo: ${top.experimentType}.`;
-  const weak = behavioralMapping.find(block => block.present === 'no' || block.quality <= 2);
-  return weak ? `Use the current page as baseline and validate ${weak.label} before changing the experience.` : 'Use the current page as baseline and validate the next measurable question before changing the experience.';
+  return 'No hay hipótesis accionable con evidencia, cambio propuesto y métrica clara.';
+}
+
+function buildTopHypothesisSection(hypotheses, behavioralMapping) {
+  if (!hypotheses.length) return '';
+  return `### Top hypothesis
+${buildNextExperiment(hypotheses, behavioralMapping)}`;
+}
+
+function buildTopReviewTask(tasks = []) {
+  const top = tasks[0];
+  if (!top) return '- No hay tareas de revisión.';
+  return `- Question: ${top.question}
+- Evidence: ${(top.evidence || []).map(escapePipes).join('; ') || 'Sin evidencia automática fuerte.'}
+- Why it matters: ${top.whyItMatters}
+- How to validate: ${top.howToValidate}
+- Owner: ${top.owner}`;
 }
 
 function buildHighConfidenceRisks(findings = []) {
@@ -831,13 +902,9 @@ function buildHighConfidenceRisks(findings = []) {
   return risks.join('\n') || '- No se detectan fricciones UX de alta confianza.';
 }
 
-function buildManualReviewSummary(findings = [], behavioralMapping = []) {
-  const reviewFindings = findings
-    .filter(finding => finding.priority === 'Review' || finding.confidence === 'low')
-    .map(finding => `- ${finding.title}: ${finding.rationale}`);
-  const weakBlocks = getWeakBlocks(behavioralMapping)
-    .map(block => `- Weak block ${block.label}: ${block.missing?.[0] || 'needs manual review'}`);
-  return [...reviewFindings, ...weakBlocks].join('\n') || '- No manual review items detected beyond normal QA.';
+function buildManualReviewSummary(reviewTasks = []) {
+  const items = uniqueReviewTasks(reviewTasks).map(task => `- [${reviewTaskTag(task)}] ${reviewTaskSummary(task)}`);
+  return items.join('\n') || '- No hay elementos de revisión manual más allá del QA normal.';
 }
 
 function buildDesignSystemDebtSummary(findings = []) {
@@ -856,6 +923,7 @@ function buildRecommendedMetrics(hypotheses = []) {
     for (const metric of hypothesis.metrics?.secondary || []) secondary.add(metric);
     for (const metric of hypothesis.metrics?.guardrail || []) guardrail.add(metric);
   }
+  for (const metric of primary) secondary.delete(metric);
 
   return [
     '### Primary',
@@ -867,6 +935,39 @@ function buildRecommendedMetrics(hypotheses = []) {
     '### Guardrails',
     ...(guardrail.size ? Array.from(guardrail).map(metric => `- ${metric}`) : ['- no accessibility regressions'])
   ].join('\n');
+}
+
+function uniqueReviewTasks(tasks = []) {
+  const seen = new Set();
+  return tasks.filter(task => {
+    const key = `${reviewTaskTag(task)}:${reviewTaskSummary(task)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function reviewTaskTag(task = {}) {
+  const text = `${task.question || ''} ${(task.evidence || []).join(' ')}`.toLowerCase();
+  if (/target|audiencia|perfil|dispositivo|para qui[eé]n/.test(text)) return 'Who';
+  if (/proceso|pasos|despu[eé]s|cta|alta|contrataci[oó]n|gesti[oó]n|activaci[oó]n/.test(text) && !/cta principal|label|jerarqu/i.test(text)) return 'How';
+  if (/cta principal|label|jerarqu|objetivo de negocio|dónde actuar/.test(text)) return 'Where';
+  if (/urgencia|temporal|hasta|cobertura/.test(text)) return 'When';
+  return 'Review';
+}
+
+function reviewTaskSummary(task = {}) {
+  const question = task.question || '';
+  const tag = reviewTaskTag(task);
+  if (tag === 'Who') return 'Validar si el target funcional por dispositivo es suficiente o necesita perfil explícito.';
+  if (tag === 'How') return 'Validar si el proceso explica qué ocurre después del CTA.';
+  if (tag === 'Where') return 'Validar si el CTA principal responde al objetivo de negocio.';
+  if (tag === 'When') return 'Validar si existe urgencia real o solo límites de valor/cobertura.';
+  return question || 'Validar la señal antes de proponer cambios.';
+}
+
+function uniqueLines(lines = []) {
+  return Array.from(new Set(lines.filter(Boolean)));
 }
 
 function translateImpact(value) {

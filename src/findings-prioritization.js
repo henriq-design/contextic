@@ -1,3 +1,5 @@
+import { behavioralBlockDisplayLabel } from './behavioral-model.js';
+
 const FINDING_TYPES = new Set([
   'conversion_risk',
   'content_gap',
@@ -67,17 +69,20 @@ function frictionToFinding(friction = {}) {
     impact,
     effort,
     priority: assignPriority({ friction, type, severity, confidence, impact }),
-    rationale: buildRationale({ friction, type, severity, confidence, impact })
+    rationale: buildRationale({ friction, type, severity, confidence, impact }),
+    recommendation: friction.recommendation || '',
+    metric: friction.metric || '',
+    proposedChange: friction.proposedChange || friction.recommendation || ''
   });
 }
 
 function weakBlocksToReviewFindings(behavioralMapping = []) {
   return behavioralMapping
-    .filter(block => block.present !== 'sí' || block.quality <= 2)
+    .filter(block => block.present === 'no' || block.quality <= 2)
     .map(block => createFinding({
       id: `review.weak-block.${block.block}`,
       type: 'manual_review',
-      title: `Weak block: ${block.label || block.block}`,
+      title: `Bloque a revisar: ${block.displayLabel || behavioralBlockDisplayLabel(block.block)} (${block.block})`,
       evidence: [
         ...(block.evidence || []).slice(0, 2),
         ...(block.missing || []).slice(0, 2)
@@ -88,7 +93,7 @@ function weakBlocksToReviewFindings(behavioralMapping = []) {
       impact: 'medium',
       effort: 'medium',
       priority: 'Review',
-      rationale: 'Bloque behavioral débil sin fricción heurística fuerte; se mantiene como revisión manual, no como bloqueo crítico.'
+      rationale: block.missing?.[0] || 'Bloque behavioral débil sin fricción heurística fuerte; se mantiene como revisión manual, no como bloqueo crítico.'
     }));
 }
 
@@ -104,7 +109,10 @@ function createFinding(input = {}) {
     impact: normalizeImpact(input.impact),
     effort: normalizeEffort(input.effort),
     priority: input.priority || 'Review',
-    rationale: input.rationale || 'Prioridad asignada por evidencia, severidad, confianza e impacto.'
+    rationale: input.rationale || 'Prioridad asignada por evidencia, severidad, confianza e impacto.',
+    recommendation: input.recommendation || '',
+    metric: input.metric || '',
+    proposedChange: input.proposedChange || ''
   };
 }
 

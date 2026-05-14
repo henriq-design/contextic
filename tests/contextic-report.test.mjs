@@ -16,6 +16,7 @@ test('buildContexticReport returns the expected root keys', () => {
     'detectedComponents',
     'findings',
     'hypotheses',
+    'reviewTasks',
     'behavioralMapping',
     'uxFrictions',
     'implementationRules',
