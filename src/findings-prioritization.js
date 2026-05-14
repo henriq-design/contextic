@@ -63,7 +63,7 @@ function frictionToFinding(friction = {}) {
     type,
     title: friction.title || 'Hallazgo UX',
     evidence: normalizeEvidence(friction),
-    affectedArea: friction.block || friction.affectedArea || 'screen',
+    affectedArea: type === 'design_system_debt' ? (friction.affectedArea || designSystemAffectedArea(friction)) : (friction.block || friction.affectedArea || 'screen'),
     severity,
     confidence,
     impact,
@@ -142,7 +142,7 @@ function isCriticalBlocker(friction, type, severity, confidence) {
 function buildRationale({ friction, type, severity, confidence, impact }) {
   const evidence = normalizeEvidence(friction)[0] || 'evidencia heurística limitada';
   if (type === 'design_system_debt') {
-    return `Deuda de sistema de diseño: prioridad DS basada en severidad ${severity}, confianza ${confidence} y evidencia: ${evidence}`;
+    return `Deuda de sistema de diseño: prioridad DS basada en severidad ${severity}, confianza ${confidence} y evidencia técnica: ${evidence}`;
   }
   if (confidence === 'low') {
     return `Señal ambigua o de baja confianza; requiere revisión manual antes de priorizar. Evidencia: ${evidence}`;
@@ -161,6 +161,14 @@ function inferFindingType(friction) {
   if (/what\.|why\.|ambiguedad|ambigüedad|copy|contenido|propuesta/.test(id + title + type)) return 'content_gap';
   if (/inference|semantic|heuristic/.test(String(friction.evidenceType || ''))) return 'semantic_inference_risk';
   return 'conversion_risk';
+}
+
+function designSystemAffectedArea(friction = {}) {
+  const text = `${friction.ruleId || friction.id || ''} ${friction.title || ''}`.toLowerCase();
+  if (/spacing|espaciado/.test(text)) return 'spacing scale / layout tokens';
+  if (/radius|radio/.test(text)) return 'radius / component tokens';
+  if (/color|paleta/.test(text)) return 'color tokens';
+  return 'design system tokens';
 }
 
 function normalizeEvidence(friction) {

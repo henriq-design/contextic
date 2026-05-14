@@ -190,24 +190,24 @@ function semanticRoleFromContext(element, context = {}) {
   const descriptor = elementDescriptor(element);
   const role = String(element.getAttribute?.('role') || '').toLowerCase();
   const ariaInvalid = element.getAttribute?.('aria-invalid') === 'true';
-  const text = String(element.textContent || '').toLowerCase();
-  const evidence = `${descriptor} ${text}`;
+  const evidence = descriptor;
   const isAlert = role === 'alert' || context.componentType === 'alert';
+  const hasValidationComponent = /\b(error|invalid|danger|destructive|field-error|validation|form-error)\b/.test(descriptor);
+  const hasWarningComponent = /\b(warning|caution|notice|alert)\b/.test(descriptor);
+  const hasSuccessComponent = /\b(success|valid|completed|complete|confirmation|confirmed)\b/.test(descriptor);
+  const hasInfoComponent = /\b(alert-info|info-alert|help|tip|tooltip|hint|notice)\b/.test(descriptor) && context.componentType !== 'link';
 
   if (ariaInvalid) return { role: 'error', reason: 'aria-invalid="true" is strong error evidence.' };
-  if (/\b(error|invalid|danger|destructive)\b/.test(descriptor)) return { role: 'error', reason: 'Class, id or data attribute contains error/invalid/danger evidence.' };
-  if (/\b(error|errores|obligatorio|obligatoria|inv[aá]lido|inv[aá]lida|fallo|failed|failure)\b/.test(text)) return { role: 'error', reason: 'Visible copy contains explicit error/required/invalid/failure language.' };
-  if (isAlert && /\b(error|errores|obligatorio|obligatoria|inv[aá]lido|inv[aá]lida|fallo|failed|failure)\b/.test(evidence)) return { role: 'error', reason: 'Alert component carries explicit error language.' };
+  if (hasValidationComponent) return { role: 'error', reason: 'Class, id or data attribute contains error/invalid/danger validation evidence.' };
+  if (isAlert && /\b(error|invalid|danger|destructive|validation)\b/.test(evidence)) return { role: 'error', reason: 'Alert component carries explicit error evidence.' };
 
-  if (/\b(success|valid|completed|complete|confirmation|confirmed)\b/.test(descriptor)) return { role: 'success', reason: 'Class, id or data attribute contains success/valid/completed evidence.' };
-  if (role === 'status' && /\b(success|valid|confirmed|completed|complete|ok|done|[eé]xito|confirmado|confirmada|completado|completada)\b/.test(text)) return { role: 'success', reason: 'role="status" contains positive confirmation copy.' };
-  if (/\b(success|confirmed|completed|complete|done|[eé]xito|correcto|confirmado|confirmada|completado|completada)\b/.test(text)) return { role: 'success', reason: 'Visible copy contains confirmation language.' };
+  if (hasSuccessComponent) return { role: 'success', reason: 'Class, id or data attribute contains success/valid/completed evidence.' };
+  if (role === 'status' && hasSuccessComponent) return { role: 'success', reason: 'role="status" contains explicit success evidence.' };
 
-  if (/\b(warning|caution|notice)\b/.test(descriptor)) return { role: 'warning', reason: 'Class, id or data attribute contains warning/caution/notice evidence.' };
+  if (hasWarningComponent) return { role: 'warning', reason: 'Class, id or data attribute contains warning/caution/notice evidence.' };
   if (isAlert && !/\b(error|danger|destructive|invalid)\b/.test(evidence)) return { role: 'warning', reason: 'Non-destructive alert component is warning evidence.' };
-  if (/\b(warning|caution|advertencia|aviso|precauci[oó]n)\b/.test(text)) return { role: 'warning', reason: 'Visible copy contains warning/advisory language.' };
 
-  if (context.componentType !== 'link' && (context.componentType === 'help' || /\b(alert-info|info-alert|help|tip|tooltip|hint)\b/.test(descriptor))) {
+  if (hasInfoComponent || context.componentType === 'help') {
     return { role: 'info', reason: 'Explicit info/help/tip component evidence.' };
   }
   return { role: 'none', reason: '' };
@@ -285,7 +285,7 @@ function guessColorRole(hex, count, contexts = [], cssVariables = []) {
   if (!relevantContexts.length) return role('utility', 'low', 'Only observed in hidden/system or utility contexts.');
 
   const baseRole = baseRoleFromCssProperty(hex, count, relevantContexts, variableHints, { luminance, saturation });
-  const semanticRole = semanticRoleFromContexts(relevantContexts);
+  const semanticRole = semanticRoleFromContexts(hex, relevantContexts, { saturation, luminance });
   if (semanticRole.role !== 'none') {
     const confidence = semanticRole.role === 'info' ? 'medium' : 'high';
     return role(semanticRole.role, confidence, `${semanticRole.reason} Semantic state overrides base CSS role "${baseRole.role}".`);
@@ -341,18 +341,25 @@ function baseRoleFromCssProperty(hex, count, contexts, variableHints, metrics) {
   return role('unknown', 'low', 'Insufficient CSS property evidence for a semantic role.');
 }
 
-function semanticRoleFromContexts(contexts) {
+function semanticRoleFromContexts(hex, contexts, metrics = {}) {
   const semanticContexts = contexts.filter(context => context.semanticContext && context.semanticContext !== 'none');
   const precedence = ['error', 'success', 'warning', 'info'];
   for (const semanticRole of precedence) {
-    const match = semanticContexts.find(context => context.semanticContext === semanticRole);
+    const match = semanticContexts.find(context => context.semanticContext === semanticRole && canSemanticStateOverrideBaseColor(hex, context, metrics));
     if (match) return { role: semanticRole, reason: match.semanticReason || 'Strong semantic context evidence found.' };
   }
   return { role: 'none', reason: '' };
 }
 
+function canSemanticStateOverrideBaseColor(hex, context, metrics = {}) {
+  const property = normalizeCssProperty(context.property);
+  if (property === 'color' && isNeutralHex(hex)) return false;
+  if (property === 'backgroundcolor' || property.includes('border') || property === 'outlinecolor') return true;
+  return Number(metrics.saturation || 0) >= 0.28 && Number(metrics.luminance || 0) < 0.92;
+}
+
 function isActionColor(contexts) {
-  return contexts.some(context => context.appearsInCta && ['backgroundcolor', 'color', 'bordercolor', 'bordertopcolor', 'borderrightcolor', 'borderbottomcolor', 'borderleftcolor'].includes(normalizeCssProperty(context.property)));
+  return contexts.some(context => context.appearsInCta && normalizeCssProperty(context.property) === 'backgroundcolor');
 }
 
 function normalizeCssProperty(property) {

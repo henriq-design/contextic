@@ -144,6 +144,25 @@ test('red in validation message is classified as error', () => {
   assert.match(red.roleReason, /error|invalid|destructive/i);
 });
 
+test('black text in error copy remains text without color semantic override', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('p', {
+        text: 'Error: campo obligatorio',
+        className: 'field-error validation-message',
+        role: 'alert',
+        style: { color: '#0d0d0d' }
+      })
+    ])
+  ]);
+
+  const black = collectColors(root).colors.find(color => color.value === '#0d0d0d');
+
+  assert.ok(black);
+  assert.equal(black.suggestedRole, 'text');
+  assert.notEqual(black.suggestedRole, 'error');
+});
+
 test('green in skip link is utility, not success', () => {
   const root = tree('body', {}, [
     tree('a', {
@@ -243,6 +262,24 @@ test('grey header text is not inferred as info without explicit informational co
   assert.ok(grey);
   assert.equal(grey.suggestedRole, 'text');
   assert.notEqual(grey.suggestedRole, 'info');
+});
+
+test('dark neutral header color is not primary without CTA background evidence', () => {
+  const root = tree('body', {}, [
+    tree('header', {}, [
+      tree('div', {
+        text: 'Vodafone',
+        className: 'header-shell',
+        style: { backgroundColor: '#333333' }
+      })
+    ])
+  ]);
+
+  const grey = collectColors(root).colors.find(color => color.value === '#333333');
+
+  assert.ok(grey);
+  assert.notEqual(grey.suggestedRole, 'primary');
+  assert.ok(['surface', 'unknown'].includes(grey.suggestedRole));
 });
 
 function tree(tag, options = {}, children = []) {

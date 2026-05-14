@@ -1,7 +1,7 @@
 export function generateHypotheses(findings = [], pageClassification = {}, context = {}) {
   const behavioralHypotheses = hypothesesFromBehavioralMapping(context.behavioralMapping || [], pageClassification);
   const rankedFindings = findings
-    .filter(finding => shouldCreateHypothesis(finding))
+    .filter(finding => shouldCreateHypothesis(finding, pageClassification))
     .sort(compareFindingsForHypotheses)
     .slice(0, Math.max(0, 5 - behavioralHypotheses.length))
     .map((finding, index) => findingToHypothesis(finding, pageClassification, behavioralHypotheses.length + index + 1));
@@ -18,7 +18,7 @@ export function generateReviewTasks(findings = [], pageClassification = {}, cont
 
   for (const finding of findings) {
     if (!finding) continue;
-    if (shouldCreateHypothesis(finding)) continue;
+    if (shouldCreateHypothesis(finding, pageClassification)) continue;
     tasks.push(findingToReviewTask(finding));
   }
 
@@ -33,11 +33,11 @@ export function generateReviewTasks(findings = [], pageClassification = {}, cont
   return dedupeTasks(tasks).slice(0, 6).map((task, index) => ({ id: `R${index + 1}`, ...task }));
 }
 
-function shouldCreateHypothesis(finding) {
+function shouldCreateHypothesis(finding, pageClassification = {}) {
   if (!finding) return false;
   if (finding.type === 'manual_review' && finding.confidence === 'low') return hasActionableExperimentInputs(finding);
   if (finding.confidence === 'low' && finding.priority === 'Review') return hasActionableExperimentInputs(finding);
-  if (finding.type === 'design_system_debt') return hasConcreteEvidence(finding) && hasPrimaryMetric(finding);
+  if (finding.type === 'design_system_debt') return pageClassification.analysisMode === 'design_system_audit' && hasConcreteEvidence(finding) && hasPrimaryMetric(finding);
   return hasConcreteEvidence(finding) && hasPrimaryMetric(finding) && (['medium', 'high'].includes(finding.confidence) || finding.impact === 'high');
 }
 
@@ -64,14 +64,15 @@ function findingToHypothesis(finding, pageClassification, number) {
 function hypothesesFromBehavioralMapping(behavioralMapping = [], pageClassification = {}) {
   const where = behavioralMapping.find(block => block.block === 'where');
   const primary = where?.diagnostics?.ctaAssessment?.primary;
-  if (!primary?.label) return [];
-  if (!/acceso\s+a\s+mi\s+seguro/i.test(primary.label)) return [];
+  const label = primary?.cleanLabel || primary?.label;
+  if (!label) return [];
+  if (!/acceso\s+a\s+mi\s+seguro/i.test(label)) return [];
 
   return [{
     id: 'H1',
     affectedArea: 'where',
     title: 'Validate hero CTA intent',
-    because: `El CTA principal visible es "${primary.label}".`,
+    because: `El CTA principal visible es "${label}".`,
     weBelieve: 'Si el objetivo de la landing es captación, el CTA puede parecer orientado a clientes existentes.',
     ifWe: 'Probamos CTA primario de contratación/simulación y movemos "Acceso a mi seguro" a secundario.',
     then: 'Debería mejorar el CTR del CTA primario y la progresión al flujo objetivo.',
@@ -99,9 +100,9 @@ function baselineReviewTask(pageClassification) {
 }
 
 function hypothesisTitle(finding, isDesignSystem) {
-  if (isDesignSystem) return `System hypothesis: ${finding.title}`;
-  if (finding.affectedArea === 'where' || /cta/i.test(finding.title)) return `Clarify the primary CTA: ${finding.title}`;
-  return `Test: ${finding.title}`;
+  if (isDesignSystem) return `Hipótesis de sistema: ${finding.title}`;
+  if (finding.affectedArea === 'where' || /cta/i.test(finding.title)) return `Clarificar el CTA principal: ${finding.title}`;
+  return `Probar: ${finding.title}`;
 }
 
 function hasActionableExperimentInputs(finding) {
@@ -148,6 +149,7 @@ function blockToReviewTask(block) {
 }
 
 function reviewQuestionForFinding(finding) {
+  if (finding.type === 'design_system_debt') return `¿La señal de sistema "${finding.title}" requiere consolidar tokens/componentes o solo documentar excepciones?`;
   if (finding.affectedArea === 'where') return '¿La acción principal es visible, jerárquica y coherente con el objetivo real de la página?';
   if (finding.affectedArea === 'who') return '¿El usuario objetivo está suficientemente identificado sin inventar un segmento?';
   if (finding.affectedArea === 'how') return '¿La página explica qué ocurre después del CTA con suficiente precisión?';
@@ -155,6 +157,7 @@ function reviewQuestionForFinding(finding) {
 }
 
 function reviewWhyForFinding(finding) {
+  if (finding.type === 'design_system_debt') return 'Separar deuda de sistema de diseño de fricción UX evita convertir señales técnicas en recomendaciones de conversión.';
   if (finding.affectedArea === 'where') return 'Un CTA ambiguo puede dividir intención o medir clics que no representan progresión real.';
   if (finding.affectedArea === 'who') return 'Una audiencia mal inferida puede llevar a copy demasiado específico o incorrecto.';
   if (finding.affectedArea === 'how') return 'Sin expectativa post-CTA, el usuario puede percibir más esfuerzo o riesgo.';
@@ -162,6 +165,7 @@ function reviewWhyForFinding(finding) {
 }
 
 function reviewValidationForFinding(finding) {
+  if (finding.type === 'design_system_debt') return 'Revisar valores únicos, one-offs, cobertura de top tokens, escala 4/8, uso en main/hero/componentes y variables CSS existentes.';
   if (finding.affectedArea === 'where') return 'Comprobar label, destino, jerarquía visual, eventos de clic y relación con el objetivo de negocio.';
   if (finding.affectedArea === 'who') return 'Contrastar con briefing, tráfico esperado y lenguaje real del usuario antes de ajustar copy.';
   if (finding.affectedArea === 'how') return 'Revisar flujo tras clic, alta, contratación, gestión, activación y mensajes de confirmación.';
@@ -169,6 +173,7 @@ function reviewValidationForFinding(finding) {
 }
 
 function reviewOwnerForFinding(finding) {
+  if (finding.type === 'design_system_debt') return 'design-system';
   if (finding.type === 'accessibility_risk') return 'dev';
   if (finding.affectedArea === 'who' || finding.type === 'content_gap') return 'content';
   if (finding.affectedArea === 'where') return 'design';
@@ -224,41 +229,41 @@ function becauseText(finding) {
 
 function beliefText(finding, isDesignSystem) {
   if (isDesignSystem) {
-    return 'A clearer component/token decision will improve implementation consistency and reduce future UI drift.';
+    return 'Una decisión más clara de tokens/componentes mejorará la consistencia de implementación y reducirá deriva futura de UI.';
   }
   if (finding.affectedArea === 'where') {
-    return 'Users may hesitate or split attention when the primary action does not clearly match the page objective.';
+    return 'Los usuarios pueden dudar o dividir su atención cuando la acción principal no coincide claramente con el objetivo de la página.';
   }
   if (finding.type === 'accessibility_risk') {
-    return 'Fixing the accessibility risk will improve task completion without reducing comprehension or conversion.';
+    return 'Corregir el riesgo de accesibilidad mejorará la finalización de tarea sin reducir comprensión ni conversión.';
   }
   return 'La intervención propuesta debe cambiar una señal observable ligada a la métrica primaria definida.';
 }
 
 function interventionText(finding, isDesignSystem, isManual) {
   if (isDesignSystem) {
-    return 'Define or consolidate the affected token/component rule, document it, and verify affected components against the rule.';
+    return 'Definimos o consolidamos la regla de token/componente afectada, la documentamos y verificamos los componentes implicados contra esa regla.';
   }
   if (isManual && finding.affectedArea === 'where') {
-    return 'Review the clarity of the primary CTA, validate whether it answers the page objective, and compare it against secondary actions.';
+    return 'Revisamos la claridad del CTA principal, validamos si responde al objetivo de la página y lo comparamos con acciones secundarias.';
   }
   if (finding.affectedArea === 'where') {
-    return 'Make the primary CTA copy, hierarchy, and placement match the main page objective while keeping secondary actions visibly secondary.';
+    return 'Alineamos copy, jerarquía y ubicación del CTA principal con el objetivo de la página, manteniendo las acciones secundarias como secundarias.';
   }
   if (finding.type === 'accessibility_risk') {
-    return 'Fix the accessibility issue and run keyboard/screen-reader and regression checks on the affected component.';
+    return 'Corregimos el problema de accesibilidad y ejecutamos checks de teclado, lector de pantalla y regresión en el componente afectado.';
   }
-  return 'Create a focused variant or review pass that addresses only this finding and preserves the current design baseline.';
+  return 'Creamos una variante o revisión enfocada que atienda solo este hallazgo y preserve el baseline visual actual.';
 }
 
 function outcomeText(finding, isDesignSystem) {
   if (isDesignSystem) {
-    return 'Implementation effort and UI inconsistency should decrease without changing product or content claims.';
+    return 'Deberían bajar el esfuerzo de implementación y la inconsistencia UI sin cambiar claims de producto o contenido.';
   }
   if (finding.affectedArea === 'where') {
-    return 'Primary CTA engagement should improve while secondary clicks and bounce do not worsen.';
+    return 'Debería mejorar la interacción con el CTA principal sin empeorar clics secundarios ni rebote.';
   }
-  return 'The affected user task should become clearer or safer without harming guardrail metrics.';
+  return 'La tarea afectada debería volverse más clara o segura sin dañar métricas de guardrail.';
 }
 
 function metricsForFinding(finding, pageClassification) {

@@ -194,7 +194,8 @@ export function createPriorityMetadata({ severityScore = 3, expectedImpact = 'me
 function collectBehavioralSignals(root, components, lowerText) {
   const headings = Array.from(root.querySelectorAll('h1, h2, h3')).filter(isVisibleElement).map(element => compactText(element.textContent, 120));
   const firstViewportHeadings = Array.from(root.querySelectorAll('h1, h2')).filter(isVisibleElement).filter(element => element.getBoundingClientRect().top >= 0 && element.getBoundingClientRect().top < (window.innerHeight || 900)).map(element => compactText(element.textContent, 120));
-  const ctas = components.samples.buttons.map(button => button.text).filter(Boolean);
+  const ctaCandidates = extractCtaCandidates(root, components);
+  const ctas = ctaCandidates.map(candidate => candidate.cleanLabel || candidate.label).filter(Boolean);
   const faqLike = headings.some(heading => /faq|preguntas frecuentes|dudas/i.test(heading));
   const hasStepper = Array.from(root.querySelectorAll('ol, [class*="step"], [class*="paso"], [data-step]')).filter(isVisibleElement).length > 0;
   const hasForm = components.counts.forms > 0 || components.counts.inputs > 0;
@@ -202,7 +203,6 @@ function collectBehavioralSignals(root, components, lowerText) {
   const hasCards = components.counts.cards >= 3;
   const audience = inferAudienceSignal(lowerText);
   const process = inferProcessSignal(lowerText, hasStepper);
-  const ctaCandidates = extractCtaCandidates(root, components);
   const ctaAssessment = assessCtaClarity(ctaCandidates, lowerText);
   const timing = inferTimingSignal(lowerText);
 
@@ -258,9 +258,9 @@ function buildBlockEvidence(block, signals, lowerText, components) {
 
   if (block === 'where') {
     if (signals.ctaAssessment.primary) {
-      evidence.push(`CTA principal visible en ${signals.ctaAssessment.primary.region}: “${signals.ctaAssessment.primary.label}” (${signals.ctaAssessment.primary.selector}).`);
+      evidence.push(`CTA principal visible en ${signals.ctaAssessment.primary.region}: “${signals.ctaAssessment.primary.cleanLabel || signals.ctaAssessment.primary.label}” (${signals.ctaAssessment.primary.selector}).`);
     }
-    if (signals.ctaAssessment.aligned) evidence.push(`El label del CTA parece alineado con el objetivo de página: “${signals.ctaAssessment.primary.label}”.`);
+    if (signals.ctaAssessment.aligned) evidence.push(`El label del CTA parece alineado con el objetivo de página: “${signals.ctaAssessment.primary.cleanLabel || signals.ctaAssessment.primary.label}”.`);
     if (!signals.ctaAssessment.primary && components.counts.buttons > 0) evidence.push(`Solo hay conteo de acciones (${components.counts.buttons} botón(es)); falta evaluar un CTA primario claro.`);
     if (signals.hasForm) evidence.push('Se detecta formulario o campos de entrada.');
   }
@@ -310,7 +310,7 @@ function getMissingSignals(block, signals, components) {
   if (signals.process.hasSteps && !signals.process.hasPostCtaExpectation) missingByBlock.how.push('Validar qué ocurre tras el CTA: alta, contratación, gestión, activación, tiempos y siguiente estado.');
   else if (!signals.process.hasSteps && !(signals.keywordHits.how || []).length) missingByBlock.how.push('No se anticipa claramente cómo funciona o qué ocurre después.');
   if (!signals.ctaAssessment.primary) missingByBlock.where.push(components.counts.buttons > 0 ? 'Hay acciones visibles, pero falta identificar un CTA primario claro en hero/main.' : 'No se detecta una acción clara para avanzar.');
-  else if (!signals.ctaAssessment.aligned) missingByBlock.where.push(`Validar si el CTA “${signals.ctaAssessment.primary.label}” expresa la acción esperada para el objetivo de la página.`);
+  else if (!signals.ctaAssessment.aligned) missingByBlock.where.push(`Validar si el CTA “${signals.ctaAssessment.primary.cleanLabel || signals.ctaAssessment.primary.label}” expresa la acción esperada para el objetivo de la página.`);
   if (!signals.timing.urgency.length) missingByBlock.when.push(signals.timing.valueCeilings.length ? 'No hay urgencia temporal: las ocurrencias de “hasta” parecen límites de valor/cobertura.' : 'No se detecta un motivo legítimo para actuar ahora.');
 
   return missingByBlock[block];
@@ -449,10 +449,16 @@ function extractCtaCandidates(root, components) {
     })
     .map(element => {
       const rect = element.getBoundingClientRect?.() || {};
-      const label = getAccessibleName(element);
+      const rawText = getAccessibleName(element);
+      const labelParts = cleanCtaLabel(rawText, element);
       const region = root?.__contexticRegionFor?.(element) || inferRegionFromElement(element);
       return {
-        label,
+        label: labelParts.cleanLabel,
+        cleanLabel: labelParts.cleanLabel,
+        cleanLabelConfidence: labelParts.cleanLabelConfidence,
+        rawText: labelParts.rawText,
+        iconText: labelParts.iconText,
+        visualMetadata: labelParts.visualMetadata,
         selector: describeElement(element),
         href: element.getAttribute?.('href') || element.getAttribute?.('action') || '',
         action: element.getAttribute?.('type') || element.getAttribute?.('data-action') || '',
@@ -462,7 +468,7 @@ function extractCtaCandidates(root, components) {
         componentType: inferCtaComponentType(element)
       };
     })
-    .filter(candidate => candidate.label)
+    .filter(candidate => candidate.cleanLabel || candidate.rawText)
     .slice(0, 16);
 }
 
@@ -470,8 +476,44 @@ function assessCtaClarity(candidates, lowerText) {
   const primary = candidates.find(candidate => candidate.aboveTheFold && ['hero', 'main'].includes(candidate.region) && candidate.visualHierarchy === 'primary')
     || candidates.find(candidate => ['hero', 'main'].includes(candidate.region) && candidate.visualHierarchy === 'primary')
     || candidates.find(candidate => candidate.aboveTheFold && ['hero', 'main'].includes(candidate.region));
-  const aligned = primary ? isCtaLabelAligned(primary.label, lowerText) : false;
+  const aligned = primary ? isCtaLabelAligned(primary.cleanLabel || primary.label, lowerText) : false;
   return { primary, aligned, candidates };
+}
+
+function cleanCtaLabel(rawText, element) {
+  const raw = compactText(rawText, 160);
+  const visualMetadata = [];
+  const iconText = [];
+  let clean = raw;
+
+  clean = clean.replace(/color\s*#[0-9A-Fa-f]{6}(?=[A-ZÁÉÍÓÚÑ]|[^0-9A-Fa-f]|$)|color\s*#[0-9A-Fa-f]{3}(?=[A-ZÁÉÍÓÚÑ]|[^0-9A-Fa-f]|$)/g, match => {
+    visualMetadata.push(compactText(match, 60));
+    return ' ';
+  });
+  clean = clean.replace(/#[0-9A-Fa-f]{6}(?=[A-ZÁÉÍÓÚÑ]|[^0-9A-Fa-f]|$)|#[0-9A-Fa-f]{3}(?=[A-ZÁÉÍÓÚÑ]|[^0-9A-Fa-f]|$)/g, match => {
+    visualMetadata.push(match);
+    return ' ';
+  });
+  clean = clean.replace(/\b(flecha\s+(?:derecha|izquierda|arriba|abajo)|arrow\s+(?:right|left|up|down)|chevron\s+(?:right|left|up|down))\b/gi, match => {
+    iconText.push(compactText(match, 60));
+    return ' ';
+  });
+  clean = clean.replace(/\b(?:icon|ícono|svg|path|rect|circle)\b/gi, match => {
+    visualMetadata.push(compactText(match, 40));
+    return ' ';
+  });
+  clean = compactText(clean.replace(/\s+/g, ' '), 100);
+
+  if (!clean && element?.getAttribute?.('title')) clean = compactText(element.getAttribute('title'), 100);
+  const cleanLabelConfidence = clean && clean.length >= 3 ? 'high' : raw ? 'low' : 'none';
+
+  return {
+    cleanLabel: clean || raw,
+    cleanLabelConfidence,
+    rawText: raw,
+    iconText,
+    visualMetadata
+  };
 }
 
 function isCtaLabelAligned(label, lowerText) {

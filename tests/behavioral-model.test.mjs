@@ -79,6 +79,20 @@ test('Vodafone-like Where includes Acceso a mi seguro CTA details', () => {
   assert.equal(where.diagnostics.ctaAssessment.primary.visualHierarchy, 'primary');
 });
 
+test('CTA label cleaning removes color metadata and decorative icon text', () => {
+  const { root, components } = vodafoneFixture('Seguro móvil Vodafone Care.', 'color #E60000Flecha derecha Asegura tu móvil');
+  const mapping = buildBehavioralMapping({ components, frictions: [] }, root);
+  const where = mapping.find(block => block.block === 'where');
+  const primary = where.diagnostics.ctaAssessment.primary;
+
+  assert.equal(primary.cleanLabel, 'Asegura tu móvil');
+  assert.equal(primary.label, 'Asegura tu móvil');
+  assert.equal(primary.rawText, 'color #E60000Flecha derecha Asegura tu móvil');
+  assert.deepEqual(primary.iconText, ['Flecha derecha']);
+  assert.match(where.evidence.join(' '), /Asegura tu móvil/);
+  assert.doesNotMatch(where.evidence.join(' '), /#E60000|Flecha derecha/);
+});
+
 test('When does not score as strong urgency only because hasta describes value ceiling', () => {
   const { root, components } = vodafoneFixture('Seguro para tus dispositivos con cobertura hasta 3 dispositivos y hasta 1000 euros.');
   const mapping = buildBehavioralMapping({ components, frictions: [] }, root);
@@ -129,10 +143,10 @@ test('interface source uses Spanish behavioral labels instead of visible English
   assert.match(source, /Hallazgos principales/);
 });
 
-function vodafoneFixture(text = 'Seguro para tus dispositivos. Protege tu móvil, tablet y smartwatch hasta 3 dispositivos.') {
+function vodafoneFixture(text = 'Seguro para tus dispositivos. Protege tu móvil, tablet y smartwatch hasta 3 dispositivos.', ctaText = 'Acceso a mi seguro') {
   const heading = tree('h1', { text: 'Vodafone Care', rect: { top: 40, width: 420, height: 56 } });
   const cta = tree('a', {
-    text: 'Acceso a mi seguro',
+    text: ctaText,
     className: 'primary cta',
     attributes: { href: '/c/vodafone-care/seguro/' },
     rect: { top: 220, width: 260, height: 52 }

@@ -7,30 +7,30 @@ import { buildDesignContextMarkdown, buildGitHubIssueMarkdown, buildGithubIssueE
 test('design context markdown leads with technical design context sections', () => {
   const markdown = buildDesignContextMarkdown(createSnapshot());
 
-  assert.match(markdown, /## Page classification/);
-  assert.match(markdown, /## Scope map/);
-  assert.match(markdown, /## Capture metadata/);
-  assert.match(markdown, /## Executive summary/);
-  assert.match(markdown, /## Design system snapshot/);
-  assert.match(markdown, /## Component inventory/);
-  assert.match(markdown, /## Behavioral assessment/);
-  assert.match(markdown, /## Implementation guidance/);
-  assert.match(markdown, /## UX findings/);
-  assert.match(markdown, /## Design system findings/);
-  assert.match(markdown, /## Accessibility findings/);
-  assert.match(markdown, /## Low-confidence findings/);
-  assert.match(markdown, /## Hypotheses and experiments/);
-  assert.match(markdown, /### High-confidence risks/);
-  assert.match(markdown, /### Top hypothesis/);
+  assert.match(markdown, /## Clasificación de página/);
+  assert.match(markdown, /## Mapa de alcance/);
+  assert.match(markdown, /## Metadatos de captura/);
+  assert.match(markdown, /## Resumen ejecutivo/);
+  assert.match(markdown, /## Snapshot de sistema de diseño/);
+  assert.match(markdown, /## Inventario de componentes/);
+  assert.match(markdown, /## Evaluación behavioral/);
+  assert.match(markdown, /## Guía de implementación/);
+  assert.match(markdown, /## Hallazgos UX/);
+  assert.match(markdown, /## Hallazgos de sistema de diseño/);
+  assert.match(markdown, /## Hallazgos de accesibilidad/);
+  assert.match(markdown, /## Hallazgos de baja confianza/);
+  assert.match(markdown, /## Hipótesis y experimentos/);
+  assert.match(markdown, /### Riesgos de alta confianza/);
+  assert.match(markdown, /### Hipótesis principal/);
 });
 
 test('behavioral notes are not the main axis above the technical snapshot', () => {
   const markdown = buildDesignContextMarkdown(createSnapshot());
 
-  const snapshotIndex = markdown.indexOf('## Design system snapshot');
-  const componentIndex = markdown.indexOf('## Component inventory');
-  const assessmentIndex = markdown.indexOf('## Behavioral assessment');
-  const frictionIndex = markdown.indexOf('## UX findings');
+  const snapshotIndex = markdown.indexOf('## Snapshot de sistema de diseño');
+  const componentIndex = markdown.indexOf('## Inventario de componentes');
+  const assessmentIndex = markdown.indexOf('## Evaluación behavioral');
+  const frictionIndex = markdown.indexOf('## Hallazgos UX');
   const behavioralMapIndex = markdown.indexOf('### Mapa de bloques behavioral');
 
   assert.ok(snapshotIndex > -1);
@@ -43,16 +43,16 @@ test('behavioral notes are not the main axis above the technical snapshot', () =
 test('github issue export includes the required issue structure', () => {
   const markdown = buildGithubIssueExport(createSnapshot());
 
-  assert.match(markdown, /^# \[Contextic\] Review landing findings for Example page/);
-  assert.match(markdown, /## Context/);
-  assert.match(markdown, /## Summary/);
-  assert.match(markdown, /## Top findings/);
-  assert.match(markdown, /## Hypotheses/);
-  assert.match(markdown, /## Implementation notes/);
-  assert.match(markdown, /## Acceptance criteria/);
-  assert.match(markdown, /## Raw exports/);
-  assert.match(markdown, /- \[ \] CTA hierarchy validated/);
-  assert.match(markdown, /Primary metric:/);
+  assert.match(markdown, /^# \[Contextic\] Revisar hallazgos landing para Example page/);
+  assert.match(markdown, /## Contexto/);
+  assert.match(markdown, /## Resumen/);
+  assert.match(markdown, /## Hallazgos principales/);
+  assert.match(markdown, /## Hipótesis/);
+  assert.match(markdown, /## Notas de implementación/);
+  assert.match(markdown, /## Criterios de aceptación/);
+  assert.match(markdown, /## Exports raw/);
+  assert.match(markdown, /- \[ \] Jerarquía de CTA validada/);
+  assert.match(markdown, /Métrica primaria:/);
 });
 
 test('copy exports can be generated from the same snapshot', () => {
@@ -66,7 +66,7 @@ test('copy exports can be generated from the same snapshot', () => {
   assert.equal(parsedReport.meta.sourceUrl, snapshot.meta.url);
   assert.equal(parsedReport.screenSummary.pageTitle, snapshot.meta.title);
   assert.equal(parsedReport.pageClassification.archetype, 'landing');
-  assert.match(githubIssue, /Components affected: Button \(2\)/);
+  assert.match(githubIssue, /Componentes afectados: Button \(2\)/);
   assert.match(githubIssue, /Acciones primarias compitiendo/);
 });
 
@@ -85,9 +85,9 @@ test('github issue export flags snapshot only mode without conversion recommenda
     behavioralRecommendation: { sections: [] }
   }));
 
-  assert.match(markdown, /analysis mode is snapshot_only; no conversion recommendations are generated/);
-  assert.match(markdown, /## Top findings/);
-  assert.match(markdown, /No findings were generated/);
+  assert.match(markdown, /modo de análisis es snapshot_only; no se generan recomendaciones de conversión/);
+  assert.match(markdown, /## Hallazgos principales/);
+  assert.match(markdown, /No se generaron hallazgos/);
   assert.doesNotMatch(markdown, /CTR del CTA principal/);
 });
 
@@ -106,10 +106,10 @@ test('limited archetypes do not emit conversion recommendation sections', () => 
   const markdown = buildDesignContextMarkdown(snapshot);
   const jsonReport = JSON.parse(buildJsonExport(snapshot));
 
-  assert.match(markdown, /Analysis mode: limited_behavioral/);
+  assert.match(markdown, /Modo de análisis: limited_behavioral/);
   assert.match(markdown, /No se generan recomendaciones de conversión/);
-  assert.match(markdown, /## Low-confidence findings/);
-  assert.doesNotMatch(markdown, /## Prioritized follow-up/);
+  assert.match(markdown, /## Hallazgos de baja confianza/);
+  assert.doesNotMatch(markdown, /## Seguimiento priorizado/);
   assert.doesNotMatch(markdown, /CTR del CTA principal/);
   assert.equal(jsonReport.pageClassification.archetype, 'ecommerce_category');
   assert.equal(jsonReport.pageClassification.analysisMode, 'limited_behavioral');
@@ -124,8 +124,8 @@ test('GitHub issue compatibility export stays wired to the new export', () => {
 test('github issue export stays conservative when evidence is missing', () => {
   const markdown = buildGithubIssueExport({});
 
-  assert.match(markdown, /Review unknown findings for untitled page/);
-  assert.match(markdown, /snapshot_only; no conversion recommendations are generated/);
+  assert.match(markdown, /Revisar hallazgos unknown para página sin título/);
+  assert.match(markdown, /snapshot_only; no se generan recomendaciones de conversión/);
   assert.match(markdown, /No hay fricciones UX de alta confianza/);
   assert.doesNotMatch(markdown, /undefined|NaN/);
   assert.doesNotMatch(markdown, /0 button\/CTA candidate/);

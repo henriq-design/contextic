@@ -4,22 +4,24 @@ import { evaluateBehavioralRules } from './behavioral-rules.js';
 export function detectFrictions({ colors, spacing, components }, root = document.body) {
   const frictions = evaluateBehavioralRules({ colors, spacing, components, root });
 
-  if (spacing.totalUniqueSpacingValues > 18) {
+  if (shouldCreateSpacingDebtFinding(spacing)) {
     frictions.push(createFinding({
-      block: 'how',
-      affectedBlocks: ['how', 'where'],
-      type: 'esfuerzo_percibido',
-      typeLabel: 'Esfuerzo percibido',
+      ruleId: 'design-system.spacing-scale-drift',
+      block: '',
+      affectedBlocks: [],
+      affectedArea: 'spacing scale / layout tokens',
+      type: 'design_system_debt',
+      typeLabel: 'Deuda de sistema de diseño',
       severity: 'media',
-      severityScore: 3,
+      severityScore: spacingDebtSeverity(spacing),
       expectedImpact: 'medium',
       implementationEffort: 'medium',
       confidence: 'media',
       evidenceType: 'structural',
-      evidence: `${spacing.totalUniqueSpacingValues} valores únicos de espaciado.`,
+      evidence: spacingDebtEvidence(spacing),
       principle: 'fluidez visual',
       title: 'La escala de espaciado podría estar derivando',
-      insight: `Se detectan ${spacing.totalUniqueSpacingValues} valores únicos de espaciado.`,
+      insight: `Se detectan señales de posible deriva en la escala de espaciado.`,
       risk: 'Demasiados valores de espaciado crean ruido visual y dificultan el mantenimiento.',
       recommendation: 'Consolida alrededor de una escala pequeña de espaciado, por ejemplo 4/8/12/16/24/32/48.',
       systemImplication: 'Mapea valores repetidos a tokens y documenta las excepciones permitidas.'
@@ -28,10 +30,12 @@ export function detectFrictions({ colors, spacing, components }, root = document
 
   if (spacing.totalUniqueRadiusValues > 5) {
     frictions.push(createFinding({
-      block: 'where',
-      affectedBlocks: ['where'],
-      type: 'baja_accionabilidad',
-      typeLabel: 'Baja accionabilidad',
+      ruleId: 'design-system.radius-scale-drift',
+      block: '',
+      affectedBlocks: [],
+      affectedArea: 'radius / component tokens',
+      type: 'design_system_debt',
+      typeLabel: 'Deuda de sistema de diseño',
       severity: 'media',
       severityScore: 3,
       expectedImpact: 'medium',
@@ -72,10 +76,12 @@ export function detectFrictions({ colors, spacing, components }, root = document
 
   if (colors.totalUniqueColors > 28) {
     frictions.push(createFinding({
-      block: 'where',
-      affectedBlocks: ['what', 'where'],
-      type: 'baja_accionabilidad',
-      typeLabel: 'Baja accionabilidad',
+      ruleId: 'design-system.color-palette-drift',
+      block: '',
+      affectedBlocks: [],
+      affectedArea: 'color tokens',
+      type: 'design_system_debt',
+      typeLabel: 'Deuda de sistema de diseño',
       severity: 'media',
       severityScore: 3,
       expectedImpact: 'medium',
@@ -100,7 +106,7 @@ function createFinding(finding) {
   const expectedImpact = finding.expectedImpact || 'medium';
   const implementationEffort = finding.implementationEffort || 'medium';
   const priority = createPriorityMetadata({ severityScore, expectedImpact, implementationEffort });
-  const hypothesis = finding.hypothesis || toHypothesis(finding.insight || finding.evidence);
+  const hypothesis = finding.hypothesis || toHypothesis(finding);
 
   return {
     block: 'what',
@@ -131,7 +137,46 @@ function severityToScore(severity = 'media') {
   return { baja: 2, media: 3, alta: 4, critica: 5 }[severity] || 3;
 }
 
-function toHypothesis(signal = '') {
+function toHypothesis(finding = {}) {
+  const signal = finding.insight || finding.evidence || '';
+  if (finding.type === 'design_system_debt') {
+    return signal || 'Deuda de sistema de diseño que requiere revisión de tokens y componentes.';
+  }
   if (!signal) return 'Podría existir una fricción conductual que requiere validación de producto/diseño.';
   return `Podría existir una fricción conductual asociada a esta señal: ${signal}`;
+}
+
+function shouldCreateSpacingDebtFinding(spacing = {}) {
+  const diagnostics = spacing.spacingDiagnostics || {};
+  const unique = diagnostics.uniqueValues ?? spacing.totalUniqueSpacingValues ?? 0;
+  if (unique <= 18) return false;
+
+  const oneOffs = diagnostics.oneOffs || 0;
+  const topFiveCoverage = diagnostics.topFiveCoverage || 0;
+  const alignedToFourRatio = diagnostics.alignedToFourRatio || 0;
+  const mainHeroReusableUsage = diagnostics.mainHeroReusableUsage || 0;
+  const systemOrFooterUsage = diagnostics.systemOrFooterUsage || 0;
+  const mostlyScaled = alignedToFourRatio >= 0.85;
+  const mostlyConcentrated = topFiveCoverage >= 0.72;
+  const mostlySystem = systemOrFooterUsage > mainHeroReusableUsage;
+
+  if (mostlyScaled && (mostlyConcentrated || mostlySystem)) return false;
+  return unique > 24 || oneOffs >= 8 || (unique > 18 && alignedToFourRatio < 0.7 && mainHeroReusableUsage > 12);
+}
+
+function spacingDebtSeverity(spacing = {}) {
+  const diagnostics = spacing.spacingDiagnostics || {};
+  if ((diagnostics.uniqueValues || spacing.totalUniqueSpacingValues || 0) > 32 && (diagnostics.alignedToFourRatio || 0) < 0.65) return 4;
+  return 3;
+}
+
+function spacingDebtEvidence(spacing = {}) {
+  const diagnostics = spacing.spacingDiagnostics || {};
+  return [
+    `${diagnostics.uniqueValues ?? spacing.totalUniqueSpacingValues ?? 0} valores únicos de espaciado`,
+    `${diagnostics.oneOffs ?? 0} valores one-off`,
+    `${Math.round((diagnostics.topFiveCoverage || 0) * 100)}% cubierto por top 5`,
+    `${Math.round((diagnostics.alignedToFourRatio || 0) * 100)}% alineado a escala 4px`,
+    `${diagnostics.mainHeroReusableUsage || 0} usos en main/hero/secciones`
+  ].join('; ') + '.';
 }

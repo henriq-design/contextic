@@ -32,17 +32,42 @@ test('conversion finding generates measurable hypothesis with guardrails', () =>
   assert.equal(hypotheses[0].metrics.primary, 'primary CTA CTR');
   assert.ok(hypotheses[0].metrics.guardrail.length > 0);
   assert.equal(hypotheses[0].experimentType, 'A/B test');
-  assert.match(hypotheses[0].ifWe, /primary CTA/i);
+  assert.match(hypotheses[0].ifWe, /CTA principal/i);
 });
 
 test('design system debt creates system hypothesis, not conversion hypothesis', () => {
+  const finding = {
+    id: 'design.radius-drift',
+    type: 'design_system_debt',
+    title: 'Inconsistencia en radios de borde',
+    evidence: ['8 valores únicos de radio.'],
+    affectedArea: 'radius',
+    severity: 3,
+    confidence: 'medium',
+    impact: 'medium',
+    effort: 'medium',
+    priority: 'DS-P2',
+    rationale: 'Deuda de sistema.'
+  };
+  const normalHypotheses = generateHypotheses([finding], landing);
   const hypotheses = generateHypotheses([
+    finding
+  ], { ...landing, analysisMode: 'design_system_audit' });
+
+  assert.deepEqual(normalHypotheses, []);
+  assert.equal(hypotheses[0].experimentType, 'QA audit');
+  assert.equal(hypotheses[0].metrics.primary, 'component/token reuse rate');
+  assert.doesNotMatch(hypotheses[0].then, /conversion/i);
+});
+
+test('design system debt becomes review task outside design system audit mode', () => {
+  const reviewTasks = generateReviewTasks([
     {
-      id: 'design.radius-drift',
+      id: 'design.spacing-drift',
       type: 'design_system_debt',
-      title: 'Inconsistencia en radios de borde',
-      evidence: ['8 valores únicos de radio.'],
-      affectedArea: 'radius',
+      title: 'La escala de espaciado podría estar derivando',
+      evidence: ['26 valores únicos de espaciado; 12 valores one-off.'],
+      affectedArea: 'spacing scale / layout tokens',
       severity: 3,
       confidence: 'medium',
       impact: 'medium',
@@ -52,9 +77,8 @@ test('design system debt creates system hypothesis, not conversion hypothesis', 
     }
   ], landing);
 
-  assert.equal(hypotheses[0].experimentType, 'QA audit');
-  assert.equal(hypotheses[0].metrics.primary, 'component/token reuse rate');
-  assert.doesNotMatch(hypotheses[0].then, /conversion/i);
+  assert.match(reviewTasks[0].question, /espaciado|sistema/i);
+  assert.equal(reviewTasks[0].owner, 'design-system');
 });
 
 test('no high-confidence finding returns review task instead of baseline hypothesis', () => {
@@ -69,10 +93,10 @@ test('no high-confidence finding returns review task instead of baseline hypothe
 test('weak Where block markdown creates review task, not generic hypothesis', () => {
   const markdown = buildDesignContextMarkdown(createSnapshot());
 
-  assert.match(markdown, /## Review tasks/);
-  assert.match(markdown, /## Hypotheses and experiments/);
-  assert.match(markdown, /Question:/);
-  assert.match(markdown, /How to validate:/);
+  assert.match(markdown, /## Tareas de revisión/);
+  assert.match(markdown, /## Hipótesis y experimentos/);
+  assert.match(markdown, /Pregunta:/);
+  assert.match(markdown, /Cómo validarlo:/);
   assert.match(markdown, /No se generaron hipótesis accionables/);
   assert.doesNotMatch(markdown, /Resolving this finding should improve/);
   assert.doesNotMatch(markdown, /Mantener la versión actual/);
@@ -173,10 +197,11 @@ test('handoff summary deduplicates manual review items and omits empty top hypot
   }));
   const handoff = markdown.split('## Handoff summary')[1];
 
-  assert.equal(countMatches(handoff, '[Who]'), 1);
-  assert.equal(countMatches(handoff, '[How]'), 1);
-  assert.equal(countMatches(handoff, '[Where]'), 1);
-  assert.doesNotMatch(handoff, /### Top hypothesis/);
+  assert.equal(countMatches(handoff, '[Para quién / who]'), 1);
+  assert.equal(countMatches(handoff, '[Cómo / how]'), 1);
+  assert.equal(countMatches(handoff, '[Dónde actuar / where]'), 1);
+  assert.doesNotMatch(handoff, /\[(Who|How|Where)\]/);
+  assert.doesNotMatch(handoff, /### (Top hypothesis|Hipótesis principal)/);
 });
 
 test('recommended metrics do not duplicate metrics between primary and secondary', () => {
@@ -201,9 +226,9 @@ test('recommended metrics do not duplicate metrics between primary and secondary
       }
     ]
   }));
-  const metrics = markdown.split('## Recommended metrics')[1].split('## Handoff summary')[0];
-  const primary = metrics.split('### Secondary')[0];
-  const secondary = metrics.split('### Secondary')[1].split('### Guardrails')[0];
+  const metrics = markdown.split('## Métricas recomendadas')[1].split('## Handoff summary')[0];
+  const primary = metrics.split('### Secundarias')[0];
+  const secondary = metrics.split('### Secundarias')[1].split('### Controles de seguridad')[0];
 
   assert.match(primary, /primary CTA CTR/);
   assert.doesNotMatch(secondary, /primary CTA CTR/);
