@@ -574,6 +574,12 @@ function assertNoVisibleMarkdownRoleRegressions(markdown) {
 }
 
 function assertNoColorTraceabilityRegressions(markdown) {
+  assert.doesNotMatch(markdown, /\|\s*#[0-9a-f]{6}\s*\|\s*\d+\s*\|\s*superficie de botón inverso \(inverse_button_surface\).*?\|\s*color en/i);
+  assert.doesNotMatch(markdown, /\|\s*#[0-9a-f]{6}\s*\|\s*\d+\s*\|\s*superficie inversa \(inverse_surface\).*?\|\s*boxShadow en/i);
+  assert.doesNotMatch(markdown, /#0d0d0d.*superficie \(surface\).*BackgroundColor neutro\/claro/i);
+  assert.doesNotMatch(markdown, /\|\s*#[0-9a-f]{6}.*\|\s*color en .*?\|\s*BackgroundColor/i);
+  assert.doesNotMatch(markdown, /\|\s*#[0-9a-f]{6}.*\|\s*boxShadow en .*?\|\s*BackgroundColor/i);
+
   const colorRows = markdown.split('\n').filter(line => /^\| #[0-9a-f]{6}/i.test(line));
   for (const row of colorRows) {
     const cells = row.split('|').map(cell => cell.trim());

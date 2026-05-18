@@ -930,8 +930,8 @@ function collectColors(root = document.body, options = {}) {
     const contexts = colorContexts.get(item.value) || [];
     const role = classifyColorUsage({ value: item.value, count: item.count, contexts, cssVariables });
     const dominantUse = dominantUseFor(item.value, contexts, userFacingColorSamples, colorSamples);
-    const roleDeterminingUse = roleDeterminingUseFor(item.value, role, contexts, dominantUse, colorSamples);
-    const observedUse = roleDeterminingUse || dominantUse;
+    const roleDeterminingUse = role.roleDeterminingUse || dominantUse;
+    const observedUse = roleDeterminingUse;
     return {
       ...item,
       sample: observedUse,
@@ -952,8 +952,8 @@ function collectColors(root = document.body, options = {}) {
       const contexts = colorContexts.get(item.value) || [];
       const role = classifyColorUsage({ value: item.value, count: item.count, contexts, cssVariables });
       const dominantUse = dominantUseFor(item.value, contexts, undefined, colorSamples);
-      const roleDeterminingUse = roleDeterminingUseFor(item.value, role, contexts, dominantUse, colorSamples);
-      const observedUse = roleDeterminingUse || dominantUse;
+      const roleDeterminingUse = role.roleDeterminingUse || dominantUse;
+      const observedUse = roleDeterminingUse;
       return {
         ...item,
         sample: observedUse,
@@ -1212,61 +1212,132 @@ function classifyColorUsage(colorUsage = {}) {
   const relevantContexts = contexts.filter(context => context.visible && context.region !== 'hidden_or_system');
   const variableHints = cssVariables.filter(variable => normalizeColor(variable.value) === hex).map(variable => variable.name.toLowerCase());
 
-  if (!relevantContexts.length) return role('utility', 'low', 'Solo observado en contextos ocultos, de sistema o utilidad.', 'base_css_property');
-
-  if (isActionColor(relevantContexts) && !isNeutralActionSurface(hex, relevantContexts, { luminance })) {
-    return role('primary', variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) ? 'high' : 'medium', variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) ? 'Variable brand/primary usada como fondo de una acción principal visible.' : 'Usado como backgroundColor en un CTA o acción principal visible.', 'cta_context');
+  if (!relevantContexts.length) {
+    return role('utility', 'low', 'Solo observado en contextos ocultos, de sistema o utilidad.', 'base_css_property', contextToUse(contexts[0]));
   }
 
-  const baseRole = baseRoleFromCssProperty(hex, count, relevantContexts, variableHints, { luminance, saturation });
-  if (baseRole.role === 'shadow') return baseRole;
-  if (baseRole.role === 'text' && (isNeutralHex(hex) || luminance > 0.92) && !hasExplicitSemanticToken(variableHints)) return baseRole;
+  const metrics = { luminance, saturation };
+  const candidates = relevantContexts.map((context, index) => {
+    const roleInfo = roleFromSingleUse(hex, count, context, variableHints, metrics);
+    return { ...roleInfo, index };
+  });
+  const best = candidates.sort(compareRoleCandidates)[0];
+  if (best) return best;
 
-  const semanticRole = semanticRoleFromContexts(hex, relevantContexts, { saturation, luminance, baseRole: baseRole.role, variableHints });
-  if (semanticRole.role !== 'none') {
-    const confidence = semanticRole.role === 'info' ? 'medium' : 'high';
-    return role(semanticRole.role, confidence, semanticRole.reason, 'semantic_component');
-  }
-
-  if (variableHints.some(name => /\b(brand)\b/.test(name))) return role('brand', 'medium', 'Color expuesto mediante una variable CSS de marca.', 'brand_context');
-
-  if (relevantContexts.some(context => context.componentType === 'brand_asset')) return role('brand', 'medium', 'Usado en logo o asset de marca visible.', 'brand_context');
-
-  if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'Rol inferido desde variable CSS y uso visible.', 'brand_context');
-  return baseRole;
+  return role('unknown', 'low', 'Evidencia insuficiente de propiedad CSS para inferir rol.', 'fallback', contextToUse(relevantContexts[0]));
 }
 
 function dominantUseFor(value, contexts, userFacingColorSamples, colorSamples) {
   return userFacingColorSamples?.get(value) || colorSamples?.get(value) || contextToUse(contexts[0]);
 }
 
-function roleDeterminingUseFor(value, roleInfo, contexts, fallbackUse, colorSamples) {
-  const normalizedRole = roleInfo.role;
-  const source = roleInfo.source;
-  const relevantContexts = contexts.filter(context => context.isUserFacing);
-  const match = relevantContexts.find(context => roleUseMatchesContext(normalizedRole, source, context));
-  if (match) return contextToUse(match);
+function roleFromSingleUse(hex, count, context = {}, variableHints = [], metrics = {}) {
+  const property = normalizeCssProperty(context.property);
+  const { luminance = 0, saturation = 0 } = metrics;
+  const use = contextToUse(context);
 
-  const anyMatch = contexts.find(context => roleUseMatchesContext(normalizedRole, source, context));
-  if (anyMatch) return contextToUse(anyMatch);
+  if (property === 'boxshadow' || property === 'textshadow') {
+    return role('shadow', 'medium', 'Propiedad CSS boxShadow/textShadow mapea a sombra.', 'base_css_property', use, 60);
+  }
 
-  return fallbackUse || colorSamples?.get(value);
+  if (property.includes('border')) {
+    const semantic = semanticRoleForVisualUse(context, variableHints);
+    if (semantic.role !== 'none') return role(semantic.role, semantic.confidence, semantic.reason, 'semantic_component', use, semantic.priority);
+    return role('border', saturation < 0.25 ? 'medium' : 'low', 'Propiedad CSS de borde mapea a borde.', 'base_css_property', use, 50);
+  }
+
+  if (property === 'outline' || property === 'outlinecolor') {
+    return role('focus', 'medium', 'Propiedad CSS outline/outlineColor mapea a foco.', 'base_css_property', use, 48);
+  }
+
+  if (property === 'backgroundcolor') {
+    const semantic = semanticRoleForVisualUse(context, variableHints);
+    if (semantic.role !== 'none') return role(semantic.role, semantic.confidence, semantic.reason, 'semantic_component', use, semantic.priority);
+
+    if (context.appearsInCta && !isNeutralActionSurface(hex, [context], metrics) && isPrimaryActionRegion(context)) {
+      const hasBrandPrimary = variableHints.some(name => /\b(brand|primary|main)\b/.test(name));
+      return role('primary', hasBrandPrimary ? 'high' : 'medium', hasBrandPrimary ? 'Variable brand/primary usada como fondo de una acción principal visible.' : 'Usado como backgroundColor en un CTA o acción principal visible.', 'cta_context', use, 90);
+    }
+
+    if (context.componentType === 'button' && isInverseOrSecondarySurfaceContext(context) && (luminance > 0.92 || isNeutralHex(hex))) {
+      return role('inverse_button_surface', 'medium', 'BackgroundColor claro en botón inverso/secundario mapea a superficie de botón, no a primario.', 'base_css_property', use, 84);
+    }
+
+    if (isDarkNeutral(hex, luminance, saturation)) {
+      const reason = context.region === 'footer'
+        ? 'BackgroundColor oscuro en footer mapea a superficie inversa, no a acción primaria.'
+        : 'BackgroundColor oscuro mapea a superficie inversa, no a acción primaria.';
+      return role('inverse_surface', 'medium', reason, 'base_css_property', use, 78);
+    }
+
+    if (luminance > 0.92 || isNeutralHex(hex)) {
+      const reason = ['header', 'nav'].includes(context.region)
+        ? 'BackgroundColor claro en header/nav mapea a superficie.'
+        : 'BackgroundColor neutro/claro mapea a superficie.';
+      return role('surface', 'medium', reason, 'base_css_property', use, 74);
+    }
+
+    if (variableHints.some(name => /\b(brand)\b/.test(name))) {
+      return role('brand_surface', 'medium', 'BackgroundColor con variable CSS de marca mapea a superficie de marca.', 'brand_context', use, 70);
+    }
+    if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) {
+      const roleName = variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent';
+      return role(roleName, 'medium', 'BackgroundColor inferido desde variable CSS.', 'brand_context', use, 66);
+    }
+    if (saturation > 0.35) {
+      return role('accent', 'low', 'BackgroundColor saturado sin evidencia de CTA ni estado semántico mapea a accent.', 'base_css_property', use, 45);
+    }
+    return role('unknown', 'low', 'BackgroundColor sin evidencia de acción, marca, accent o superficie.', 'fallback', use, 20);
+  }
+
+  if (property === 'color') {
+    const semantic = semanticRoleForTextUse(hex, context, variableHints, metrics);
+    if (semantic.role !== 'none') return role(semantic.role, semantic.confidence, semantic.reason, 'semantic_component', use, semantic.priority);
+    const confidence = count > 1 ? 'high' : 'medium';
+    return role('text', confidence, 'Propiedad CSS color mapea a texto; sin evidencia semántica fuerte localizada.', 'base_css_property', use, 40);
+  }
+
+  return role('unknown', 'low', 'Evidencia insuficiente de propiedad CSS para inferir rol.', 'fallback', use, 10);
 }
 
-function roleUseMatchesContext(roleName, source, context = {}) {
-  const property = normalizeCssProperty(context.property);
-  if (source === 'cta_context' || roleName === 'primary') return property === 'backgroundcolor' && context.appearsInCta;
-  if (['surface', 'inverse_surface', 'brand_surface'].includes(roleName)) return property === 'backgroundcolor';
-  if (roleName === 'inverse_button_surface' || roleName === 'button_secondary_surface') {
-    return property === 'backgroundcolor' && context.componentType === 'button' && isInverseOrSecondarySurfaceContext(context);
+function semanticRoleForVisualUse(context = {}, variableHints = []) {
+  if (!context.semanticContext || context.semanticContext === 'none') return { role: 'none' };
+  if (['active_navigation', 'selected', 'current', 'focus', 'disabled'].includes(context.stateContext)) return { role: 'none' };
+  if (context.semanticContext === 'warning') {
+    return { role: 'warning', confidence: 'high', reason: context.semanticReason || 'Evidencia visual explícita de warning en background/borde/token.', priority: 88 };
   }
-  if (roleName === 'text') return property === 'color';
-  if (roleName === 'border') return property.includes('border');
-  if (roleName === 'focus') return property === 'outline' || property === 'outlinecolor';
-  if (roleName === 'shadow') return property === 'boxshadow' || property === 'textshadow';
-  if (roleName === 'warning') return context.semanticContext === 'warning' && property !== 'color';
-  if (['error', 'success', 'info'].includes(roleName)) return context.semanticContext === roleName;
-  return true;
+  if (['error', 'success'].includes(context.semanticContext)) {
+    return { role: context.semanticContext, confidence: 'high', reason: context.semanticReason || 'Evidencia semántica fuerte y localizada.', priority: 86 };
+  }
+  if (context.semanticContext === 'info') {
+    return { role: 'info', confidence: 'medium', reason: context.semanticReason || 'Evidencia visual explícita de info/help.', priority: 64 };
+  }
+  if (hasExplicitSemanticTokenVariable(variableHints)) {
+    const tokenRole = variableHints.find(name => /\b(error|invalid|danger|success|warning|alert|notice|info)\b/.test(name)) || '';
+    if (/\b(error|invalid|danger)\b/.test(tokenRole)) return { role: 'error', confidence: 'high', reason: 'Token visual explícito de error/danger.', priority: 86 };
+    if (/\b(success)\b/.test(tokenRole)) return { role: 'success', confidence: 'high', reason: 'Token visual explícito de success.', priority: 86 };
+    if (/\b(warning|alert|notice)\b/.test(tokenRole)) return { role: 'warning', confidence: 'high', reason: 'Token visual explícito de warning/alert.', priority: 88 };
+    if (/\b(info)\b/.test(tokenRole)) return { role: 'info', confidence: 'medium', reason: 'Token visual explícito de info.', priority: 64 };
+  }
+  return { role: 'none' };
+}
+
+function semanticRoleForTextUse(hex, context = {}, variableHints = [], metrics = {}) {
+  if (!context.semanticContext || context.semanticContext === 'none') return { role: 'none' };
+  if (context.semanticContext === 'warning') return { role: 'none' };
+  if (isNeutralHex(hex)) return { role: 'none' };
+  if (!hasExplicitSemanticTokenVariable(variableHints) && Number(metrics.saturation || 0) < 0.28) return { role: 'none' };
+  if (['error', 'success'].includes(context.semanticContext)) {
+    return { role: context.semanticContext, confidence: 'high', reason: context.semanticReason || 'Evidencia semántica fuerte y localizada en texto de estado.', priority: 62 };
+  }
+  if (context.semanticContext === 'info') {
+    return { role: 'info', confidence: 'medium', reason: context.semanticReason || 'Evidencia semántica localizada en texto informativo.', priority: 42 };
+  }
+  return { role: 'none' };
+}
+
+function compareRoleCandidates(a = {}, b = {}) {
+  return Number(b.priority || 0) - Number(a.priority || 0) || Number(a.index || 0) - Number(b.index || 0);
 }
 
 function contextToUse(context = {}) {
@@ -1278,72 +1349,17 @@ function contextToUse(context = {}) {
   };
 }
 
-function role(roleName, confidence, reason, source = 'fallback') {
+function role(roleName, confidence, reason, source = 'fallback', roleDeterminingUse, priority = 0) {
   const normalizedRole = COLOR_ROLES.has(roleName) ? roleName : 'unknown';
   return {
     role: normalizedRole,
     displayRole: displayRoleFor(normalizedRole),
     confidence,
     reason,
-    source
+    source,
+    roleDeterminingUse,
+    priority
   };
-}
-
-function baseRoleFromCssProperty(hex, count, contexts, variableHints, metrics) {
-  const { luminance, saturation } = metrics;
-  const properties = contexts.map(context => context.property);
-  const hasProperty = matcher => properties.some(property => matcher(normalizeCssProperty(property)));
-
-  if (hasProperty(property => property === 'backgroundcolor') && isDarkNeutral(hex, luminance, saturation)) {
-    if (contexts.some(context => context.region === 'footer')) {
-      return role('inverse_surface', 'medium', 'BackgroundColor oscuro en footer mapea a superficie inversa, no a acción primaria.', 'base_css_property');
-    }
-    return role('inverse_surface', 'medium', 'BackgroundColor oscuro mapea a superficie inversa, no a acción primaria.', 'base_css_property');
-  }
-  if (hasProperty(property => property === 'backgroundcolor') && contexts.some(context => context.componentType === 'button' && isInverseOrSecondarySurfaceContext(context)) && (luminance > 0.92 || isNeutralHex(hex))) {
-    return role('inverse_button_surface', 'medium', 'BackgroundColor claro en botón inverso/secundario mapea a superficie de botón, no a primario.', 'base_css_property');
-  }
-  if (hasProperty(property => property === 'backgroundcolor') && contexts.some(context => ['header', 'nav'].includes(context.region)) && (luminance > 0.92 || isNeutralHex(hex))) {
-    return role('surface', 'medium', 'BackgroundColor claro en header/nav mapea a superficie.', 'base_css_property');
-  }
-  if (hasProperty(property => property === 'backgroundcolor') && (luminance > 0.92 || isNeutralHex(hex))) {
-    return role('surface', 'medium', 'BackgroundColor neutro/claro mapea a superficie.', 'base_css_property');
-  }
-  if (hasProperty(property => property === 'color')) {
-    const confidence = count > 1 ? 'high' : 'medium';
-    return role('text', confidence, 'Propiedad CSS color mapea a texto; sin evidencia semántica fuerte localizada.', 'base_css_property');
-  }
-  if (hasProperty(property => property.includes('border'))) {
-    return role('border', saturation < 0.25 ? 'medium' : 'low', 'Propiedad CSS de borde mapea a borde.', 'base_css_property');
-  }
-  if (hasProperty(property => property === 'outline' || property === 'outlinecolor')) {
-    return role('focus', 'medium', 'Propiedad CSS outline/outlineColor mapea a foco.', 'base_css_property');
-  }
-  if (hasProperty(property => property === 'boxshadow' || property === 'textshadow')) {
-    return role('shadow', 'medium', 'Propiedad CSS boxShadow/textShadow mapea a sombra.', 'base_css_property');
-  }
-  if (hasProperty(property => property === 'backgroundcolor')) {
-    if (variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) && isActionColor(contexts)) {
-      return role('primary', 'high', 'BackgroundColor de variable primary/brand usado en CTA.', 'cta_context');
-    }
-    if (isActionColor(contexts)) return role('primary', 'medium', 'BackgroundColor en CTA visible mapea a primario.', 'cta_context');
-    if (variableHints.some(name => /\b(brand)\b/.test(name))) return role('brand', 'medium', 'BackgroundColor con variable CSS de marca.', 'brand_context');
-    if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'BackgroundColor inferido desde variable CSS.', 'brand_context');
-    if (luminance > 0.92 || isNeutralHex(hex)) return role('surface', 'medium', 'BackgroundColor neutro/claro mapea a superficie.', 'base_css_property');
-    if (saturation > 0.35) return role('accent', 'low', 'BackgroundColor saturado sin evidencia de CTA ni estado semántico mapea a accent.', 'base_css_property');
-    return role('unknown', 'low', 'BackgroundColor sin evidencia de acción, marca, accent o superficie.', 'fallback');
-  }
-  return role('unknown', 'low', 'Evidencia insuficiente de propiedad CSS para inferir rol.', 'fallback');
-}
-
-function semanticRoleFromContexts(hex, contexts, metrics = {}) {
-  const semanticContexts = contexts.filter(context => context.semanticContext && context.semanticContext !== 'none');
-  const precedence = ['error', 'success', 'warning', 'info'];
-  for (const semanticRole of precedence) {
-    const match = semanticContexts.find(context => context.semanticContext === semanticRole && canSemanticStateOverrideBaseColor(hex, context, metrics));
-    if (match) return { role: semanticRole, reason: match.semanticReason || 'Evidencia semántica fuerte y localizada.' };
-  }
-  return { role: 'none', reason: '' };
 }
 
 function displayRoleFor(roleName) {
@@ -1370,38 +1386,16 @@ function displayRoleFor(roleName) {
   }[roleName] || 'desconocido (unknown)';
 }
 
-function canSemanticStateOverrideBaseColor(hex, context, metrics = {}) {
-  const property = normalizeCssProperty(context.property);
-  const variableHints = metrics.variableHints || [];
-  const hasExplicitSemanticToken = hasExplicitSemanticTokenVariable(variableHints);
-
-  if (property === 'boxshadow' || property === 'textshadow') return false;
-  if (property === 'color') {
-    if (context.semanticContext === 'warning') return hasExplicitSemanticToken && !isNeutralHex(hex);
-    return !isNeutralHex(hex) && Number(metrics.saturation || 0) >= 0.28;
-  }
-  if (['active_navigation', 'selected', 'current', 'focus', 'disabled'].includes(context.stateContext)) return false;
-  if (property === 'backgroundcolor' || property.includes('border') || property === 'outlinecolor') return true;
-  return Number(metrics.saturation || 0) >= 0.28 && Number(metrics.luminance || 0) < 0.92;
-}
-
-function hasExplicitSemanticToken(variableHints = []) {
-  return hasExplicitSemanticTokenVariable(variableHints);
-}
-
 function hasExplicitSemanticTokenVariable(variableHints = []) {
   return variableHints.some(name => /\b(error|invalid|danger|success|warning|alert|notice|info)\b/.test(name));
 }
 
-function isActionColor(contexts) {
-  return contexts.some(context => {
-    if (!context.appearsInCta || normalizeCssProperty(context.property) !== 'backgroundcolor') return false;
-    if (['hero', 'main', 'section'].includes(context.region)) return true;
-    if (['header', 'nav'].includes(context.region)) {
-      return /\b(cta|primary|main-action)\b/i.test(`${context.selector || ''} ${context.componentType || ''}`);
-    }
-    return false;
-  });
+function isPrimaryActionRegion(context = {}) {
+  if (['hero', 'main', 'section'].includes(context.region)) return true;
+  if (['header', 'nav'].includes(context.region)) {
+    return /\b(cta|primary|main-action)\b/i.test(`${context.selector || ''} ${context.componentType || ''}`);
+  }
+  return false;
 }
 
 function isNeutralActionSurface(hex, contexts, metrics = {}) {

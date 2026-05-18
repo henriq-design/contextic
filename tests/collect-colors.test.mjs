@@ -620,10 +620,103 @@ test('inverse button surface does not use header background as observed evidence
   assert.notEqual(white.roleDeterminingUse.selector, 'div.header-shell');
 });
 
+test('exported color rows satisfy role and observedUse invariants', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('p', {
+        text: 'Texto base',
+        style: { color: '#101010' }
+      }),
+      tree('section', {
+        className: 'surface',
+        style: { backgroundColor: '#ffffff' }
+      }),
+      tree('footer', {
+        style: { backgroundColor: '#000000' }
+      }),
+      tree('a', {
+        text: 'Volver',
+        className: 'btn inverse',
+        attributes: { href: '/inicio' },
+        style: { backgroundColor: '#fefefe' }
+      }),
+      tree('button', {
+        text: 'Contratar ahora',
+        className: 'primary cta',
+        style: { backgroundColor: '#e60000' }
+      }),
+      tree('div', {
+        className: 'panel-shadow',
+        style: { boxShadow: '0 8px 24px #222222' }
+      }),
+      tree('div', {
+        className: 'panel-border',
+        style: { borderTopColor: '#333333' }
+      }),
+      tree('div', {
+        text: 'Aviso',
+        className: 'alert warning',
+        role: 'alert',
+        style: { backgroundColor: '#fff4cc', color: '#0d0d0d' }
+      })
+    ])
+  ]);
+
+  const result = collectColors(root, { limit: 24 });
+
+  for (const color of result.colors) {
+    assert.equal(color.observedUse, color.roleDeterminingUse, `observedUse must be roleDeterminingUse for ${color.value}`);
+    assertColorRoleInvariant(color);
+  }
+});
+
 function tree(tag, options = {}, children = []) {
   return new FakeElement(tag, options, children);
 }
 
 function descendants(root) {
   return root.children.flatMap(child => [child, ...descendants(child)]);
+}
+
+function assertColorRoleInvariant(color) {
+  const observed = color.observedUse || {};
+  const property = observed.property;
+  const context = observed.context || {};
+  const reason = color.roleReason || '';
+
+  if (color.suggestedRole === 'text') {
+    assert.equal(property, 'color', `${color.value} text role must use color`);
+    assert.doesNotMatch(reason, /BackgroundColor/i);
+  }
+  if (color.suggestedRole === 'shadow') {
+    assert.ok(['boxShadow', 'textShadow'].includes(property), `${color.value} shadow role must use shadow property`);
+    assert.match(reason, /sombra|shadow/i);
+  }
+  if (color.suggestedRole === 'border') {
+    assert.match(property, /^border/i, `${color.value} border role must use border property`);
+  }
+  if (color.suggestedRole === 'surface') {
+    assert.equal(property, 'backgroundColor', `${color.value} surface role must use backgroundColor`);
+    if (color.value === '#0d0d0d' || color.value === '#000000') assert.doesNotMatch(reason, /neutro\/claro/i);
+  }
+  if (color.suggestedRole === 'inverse_surface') {
+    assert.equal(property, 'backgroundColor', `${color.value} inverse_surface role must use backgroundColor`);
+    assert.match(reason, /oscuro|inversa/i);
+  }
+  if (color.suggestedRole === 'inverse_button_surface') {
+    assert.equal(property, 'backgroundColor', `${color.value} inverse_button_surface role must use backgroundColor`);
+    assert.equal(context.componentType, 'button');
+    assert.match(`${context.selector || ''}`, /inverse|secondary|tertiary|ghost|outline/i);
+    assert.notEqual(context.region, 'header');
+    assert.notEqual(context.region, 'nav');
+  }
+  if (color.suggestedRole === 'primary') {
+    assert.equal(property, 'backgroundColor', `${color.value} primary role must use backgroundColor`);
+    assert.equal(context.appearsInCta, true);
+    assert.ok(['hero', 'main', 'section'].includes(context.region) || /cta|primary|main-action/i.test(context.selector || ''));
+  }
+  if (color.suggestedRole === 'warning') {
+    assert.notEqual(property, 'color', `${color.value} warning role must not use internal text color`);
+    assert.ok(property === 'backgroundColor' || /^border/i.test(property) || property === 'outlineColor');
+  }
 }
