@@ -1,4 +1,5 @@
 export function generateHypotheses(findings = [], pageClassification = {}, context = {}) {
+  if (isPortalArchetype(pageClassification)) return [];
   const behavioralHypotheses = hypothesesFromBehavioralMapping(context.behavioralMapping || [], pageClassification);
   const rankedFindings = findings
     .filter(finding => shouldCreateHypothesis(finding, pageClassification))
@@ -29,15 +30,62 @@ export function generateReviewTasks(findings = [], pageClassification = {}, cont
     tasks.push(blockToReviewTask(block));
   }
 
+  if (isPortalArchetype(pageClassification)) {
+    tasks.push(...portalReviewTasks(pageClassification, context));
+  }
+
   return dedupeTasks(tasks).sort(compareReviewTasks).slice(0, 6).map((task, index) => ({ id: `R${index + 1}`, ...task }));
 }
 
 function shouldCreateHypothesis(finding, pageClassification = {}) {
   if (!finding) return false;
+  if (isPortalArchetype(pageClassification)) return false;
   if (finding.type === 'manual_review' && finding.confidence === 'low') return hasActionableExperimentInputs(finding);
   if (finding.confidence === 'low' && finding.priority === 'Review') return hasActionableExperimentInputs(finding);
   if (finding.type === 'design_system_debt') return pageClassification.analysisMode === 'design_system_audit' && hasConcreteEvidence(finding) && hasPrimaryMetric(finding);
   return hasConcreteEvidence(finding) && hasPrimaryMetric(finding) && (['medium', 'high'].includes(finding.confidence) || finding.impact === 'high');
+}
+
+function isPortalArchetype(pageClassification = {}) {
+  return ['home_or_portal', 'education_portal', 'content_portal', 'corporate_home', 'marketing_home'].includes(pageClassification.archetype);
+}
+
+function portalReviewTasks(pageClassification = {}, context = {}) {
+  const signals = (pageClassification.signals || []).join(' ').toLowerCase();
+  const tasks = [];
+  const isEducation = pageClassification.archetype === 'education_portal' || /educaci[oó]n|docentes|alumnado|centros|libros|recursos did[aá]cticos/.test(signals);
+
+  if (isEducation) {
+    tasks.push({
+      question: 'Validar si la home permite diferenciar rápidamente rutas para docentes, familias/estudiantes y centros.',
+      evidence: pageClassification.signals || ['Arquetipo de portal educativo detectado.'],
+      whyItMatters: 'Un portal educativo suele atender audiencias distintas; mezclar rutas puede aumentar desorientación y búsqueda improductiva.',
+      howToValidate: 'Revisar navegación principal, módulos de acceso, buscador/catálogo y primeras tareas por audiencia con contenido/producto.',
+      owner: 'content'
+    });
+  }
+
+  tasks.push({
+    question: '¿La home deja clara la orientación principal: contenido, catálogo, recursos o acceso institucional?',
+    evidence: pageClassification.signals || ['Arquetipo de home/portal detectado.'],
+    whyItMatters: 'En portales, la primera decisión suele ser elegir ruta, no convertir en un CTA único.',
+    howToValidate: 'Comprobar jerarquía de navegación, etiquetas de módulos, buscador y rutas principales antes de proponer cambios.',
+    owner: 'product/content'
+  });
+
+  const components = context.components || {};
+  const ctaGroups = Number(components.counts?.ctaGroups || 0);
+  if (ctaGroups > 0) {
+    tasks.push({
+      question: '¿La jerarquía de acciones diferencia rutas principales sin competir como CTAs de conversión?',
+      evidence: [`${ctaGroups} grupo(s) de acciones detectados en el inventario principal.`],
+      whyItMatters: 'Una home/portal necesita priorizar rutas por tarea o audiencia, no optimizar cada enlace como conversión.',
+      howToValidate: 'Mapear acciones visibles contra tareas principales y revisar si buscador/catálogo tienen peso suficiente.',
+      owner: 'design'
+    });
+  }
+
+  return tasks;
 }
 
 function findingToHypothesis(finding, pageClassification, number) {

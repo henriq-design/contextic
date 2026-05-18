@@ -43,7 +43,7 @@ function createSnapshot() {
   const behavioralRecommendation = fullBehavioral ? buildBehavioralStructureRecommendation({ behavioralMapping, frictions }) : { sections: [] };
   const findings = buildFindings({ frictions, behavioralMapping });
   const hypotheses = generateHypotheses(findings, pageClassification, { behavioralMapping });
-  const reviewTasks = generateReviewTasks(findings, pageClassification, { behavioralMapping });
+  const reviewTasks = generateReviewTasks(findings, pageClassification, { behavioralMapping, components });
 
   return {
     meta: {
@@ -725,6 +725,10 @@ function renderPanel(snapshot) {
       tokenList(visualNoise, visualNoiseLabel, 'No se detecta ruido visual oculto del sistema.')
     ]),
     element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Widgets/utilidades externas detectadas']),
+      tokenList(snapshot.components.systemUtilityWidgets || [], systemWidgetLabel, 'No se detectaron widgets o utilidades externas visibles.')
+    ]),
+    element('section', { class: 'section' }, [
       element('h3', { class: 'section-title' }, ['Hallazgos de sistema']),
       ...(findingGroups.designSystem.length ? [element('div', { class: 'top-findings' }, findingCards(findingGroups.designSystem.slice(0, 4), 'Sistema'))] : [
         element('p', { class: 'notice' }, ['No hay hallazgos de sistema priorizados en esta captura.'])
@@ -883,6 +887,13 @@ function visualNoiseLabel(item = {}) {
   return {
     label: item.reason || item.value || item.name || 'Señal visual oculta',
     meta: item.count ? `${item.count} uso(s)` : 'revisar'
+  };
+}
+
+function systemWidgetLabel(item = {}) {
+  return {
+    label: item.selector || 'Widget externo detectado',
+    meta: item.type === 'accessibility_widget' ? 'accesibilidad' : 'utilidad'
   };
 }
 

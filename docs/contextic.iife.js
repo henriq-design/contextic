@@ -88,6 +88,57 @@ function getAccessibleName(element) {
   return compactText(element.textContent || element.getAttribute('placeholder') || element.getAttribute('title') || '');
 }
 
+function isSystemUtilityWidget(element) {
+  if (!(element instanceof Element)) return false;
+
+  const descriptors = elementAncestry(element).map(item => elementDescriptor(item));
+  const ownDescriptor = descriptors[0] || '';
+  const ancestryDescriptor = descriptors.join(' ');
+  const hasWidgetSignal = /\b(accessibility|accessi|a11y|bmv|widget|plugin|floating|toolbar|overlay|assistive)\b/i.test(ancestryDescriptor);
+  if (!hasWidgetSignal) return false;
+
+  const hasStrongAccessibilitySignal = /\b(accessibility|accessi|a11y|bmv|assistive)\b/i.test(ancestryDescriptor);
+  const hasUtilityShellSignal = /\b(widget|plugin|floating|toolbar|overlay|tab-button|accessibility-tab)\b/i.test(ancestryDescriptor);
+  const hasFloatingGeometry = isFloatingUtilityElement(element);
+
+  return hasStrongAccessibilitySignal || (hasUtilityShellSignal && (hasFloatingGeometry || /\b(widget|plugin|toolbar|overlay)\b/i.test(ownDescriptor)));
+}
+
+function isFloatingUtilityElement(element) {
+  const rect = element.getBoundingClientRect?.();
+  if (!rect) return false;
+  const viewportWidth = window.innerWidth || 1200;
+  const viewportHeight = window.innerHeight || 900;
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  return rect.top <= 24 || rect.left <= 24 || rect.right >= viewportWidth - 24 || rect.bottom >= viewportHeight - 24;
+}
+
+function elementAncestry(element) {
+  const items = [];
+  let current = element;
+  while (current) {
+    items.push(current);
+    current = current.parentElement;
+  }
+  return items;
+}
+
+function elementDescriptor(element) {
+  const id = element.id || '';
+  const classes = Array.from(element.classList || []).join(' ');
+  const attributes = elementAttributes(element)
+    .filter(attribute => /^(class|id|data-|aria-|role)/i.test(attribute.name || ''))
+    .map(attribute => `${attribute.name || ''} ${attribute.value || ''}`)
+    .join(' ');
+  return `${id} ${classes} ${attributes}`.toLowerCase();
+}
+
+function elementAttributes(element) {
+  if (!element?.attributes) return [];
+  if (typeof element.attributes[Symbol.iterator] === 'function') return Array.from(element.attributes);
+  return Object.entries(element.attributes).map(([name, value]) => ({ name, value }));
+}
+
 
 // ---- src/behavioral-finding.js ----
 const IMPACT_WEIGHTS = { low: 1, medium: 2, high: 3 };
@@ -876,9 +927,9 @@ function collectColors(root = document.body, options = {}) {
   }
 
   const colors = topFromMap(userFacingColorUsage, limit).map(item => {
-    const sample = userFacingColorSamples.get(item.value) || colorSamples.get(item.value);
     const contexts = colorContexts.get(item.value) || [];
     const role = classifyColorUsage({ value: item.value, count: item.count, contexts, cssVariables });
+    const sample = sampleForRole(item.value, role, contexts, userFacingColorSamples, colorSamples);
     return {
       ...item,
       sample,
@@ -891,7 +942,7 @@ function collectColors(root = document.body, options = {}) {
     };
   });
   const systemHiddenVisualNoise = topFromMap(systemColorUsage, 8)
-    .filter(item => !userFacingColorUsage.has(item.value))
+    .filter(item => item.count >= (userFacingColorUsage.get(item.value) || 0))
     .map(item => {
       const contexts = colorContexts.get(item.value) || [];
       const role = classifyColorUsage({ value: item.value, count: item.count, contexts, cssVariables });
@@ -969,11 +1020,22 @@ function annotateCssVariableUsage(cssVariables, colorContexts) {
     const normalized = normalizeColor(variable.value);
     const contexts = normalized ? colorContexts.get(normalized) || [] : [];
     const visibleUse = contexts.some(context => context.isUserFacing);
+    const systemUse = contexts.some(context => context.isSystemOrHidden);
+    const isThirdPartySystem = isThirdPartySystemVariable(variable.name) || (systemUse && !visibleUse);
     return {
       ...variable,
-      usageStatus: visibleUse ? 'used visible' : contexts.length ? 'declared only' : 'unknown usage'
+      usageStatus: isThirdPartySystem
+        ? 'third-party/accessibility-widget usage'
+        : visibleUse
+          ? 'used visible'
+          : contexts.length ? 'declared only' : 'unknown usage',
+      systemUtility: isThirdPartySystem
     };
   });
+}
+
+function isThirdPartySystemVariable(name = '') {
+  return /^--bmv-/i.test(name) || /\b(accessibility|accessi|a11y|assistive|widget|plugin)\b/i.test(name);
 }
 
 function inferComponentType(element) {
@@ -1108,6 +1170,10 @@ function classifyColorUsage(colorUsage = {}) {
 
   if (!relevantContexts.length) return role('utility', 'low', 'Solo observado en contextos ocultos, de sistema o utilidad.', 'base_css_property');
 
+  if (isActionColor(relevantContexts)) {
+    return role('primary', variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) ? 'high' : 'medium', variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) ? 'Variable brand/primary usada como fondo de una acción principal visible.' : 'Usado como backgroundColor en un CTA o acción principal visible.', 'cta_context');
+  }
+
   const baseRole = baseRoleFromCssProperty(hex, count, relevantContexts, variableHints, { luminance, saturation });
   if (baseRole.role === 'shadow') return baseRole;
   if (baseRole.role === 'text' && (isNeutralHex(hex) || luminance > 0.92) && !hasExplicitSemanticToken(variableHints)) return baseRole;
@@ -1118,18 +1184,39 @@ function classifyColorUsage(colorUsage = {}) {
     return role(semanticRole.role, confidence, semanticRole.reason, 'semantic_component');
   }
 
-  if (variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) && isActionColor(relevantContexts)) {
-    return role('primary', 'high', 'Variable brand/primary usada en una acción principal visible.', 'cta_context');
-  }
   if (variableHints.some(name => /\b(brand)\b/.test(name))) return role('brand', 'medium', 'Color expuesto mediante una variable CSS de marca.', 'brand_context');
 
-  if (isActionColor(relevantContexts)) {
-    return role('primary', 'medium', 'Usado como backgroundColor en un CTA o acción principal visible.', 'cta_context');
-  }
   if (relevantContexts.some(context => context.componentType === 'brand_asset')) return role('brand', 'medium', 'Usado en logo o asset de marca visible.', 'brand_context');
 
   if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'Rol inferido desde variable CSS y uso visible.', 'brand_context');
   return baseRole;
+}
+
+function sampleForRole(value, roleInfo, contexts, userFacingColorSamples, colorSamples) {
+  const normalizedRole = roleInfo.role;
+  const source = roleInfo.source;
+  const relevantContexts = contexts.filter(context => context.isUserFacing);
+  const match = relevantContexts.find(context => {
+    const property = normalizeCssProperty(context.property);
+    if (source === 'cta_context') return property === 'backgroundcolor' && context.appearsInCta;
+    if (normalizedRole === 'surface') return property === 'backgroundcolor';
+    if (normalizedRole === 'text') return property === 'color';
+    if (normalizedRole === 'border') return property.includes('border');
+    if (normalizedRole === 'focus') return property === 'outline' || property === 'outlinecolor';
+    if (normalizedRole === 'shadow') return property === 'boxshadow' || property === 'textshadow';
+    if (['error', 'success', 'warning', 'info'].includes(normalizedRole)) return context.semanticContext === normalizedRole;
+    return true;
+  });
+
+  if (match) {
+    return {
+      selector: match.selector,
+      property: match.property,
+      context: match
+    };
+  }
+
+  return userFacingColorSamples.get(value) || colorSamples.get(value);
 }
 
 function role(roleName, confidence, reason, source = 'fallback') {
@@ -1465,6 +1552,7 @@ function collectComponents(root = document.body) {
   const badges = userFacingElements(allBadges);
   const dialogs = userFacingElements(allDialogs);
   const ctaGroups = findCtaGroups(buttons, links);
+  const systemUtilityWidgets = detectSystemUtilityWidgets(root);
 
   const buttonSamples = buttons.slice(0, 8).map(element => ({
     text: getAccessibleName(element),
@@ -1504,6 +1592,7 @@ function collectComponents(root = document.body) {
       badges: allBadges.length - badges.length,
       dialogs: allDialogs.length - dialogs.length
     },
+    systemUtilityWidgets,
     samples: {
       buttons: buttonSamples,
       unlabeledInputs: unlabeledInputs.slice(0, 8).map(describeElement),
@@ -1526,6 +1615,35 @@ function collectComponents(root = document.body) {
       allInputs
     }
   };
+}
+
+function detectSystemUtilityWidgets(root) {
+  const seen = new Set();
+  const widgets = [];
+
+  for (const item of componentElements(root, 'button, [role="button"], [class*="accessibility"], [class*="accessi"], [class*="a11y"], [class*="bmv"], [class*="widget"], [class*="toolbar"], [class*="assistive"], [id*="accessibility"], [id*="bmv"]')) {
+    if (!item.context.isSystemOrHidden) continue;
+    const element = systemUtilityRoot(item.element);
+    if (seen.has(element)) continue;
+    seen.add(element);
+    widgets.push({
+      type: /accessibility|accessi|a11y|bmv|assistive/i.test(describeElement(element)) ? 'accessibility_widget' : 'system_utility',
+      selector: describeElement(element),
+      region: item.context.region
+    });
+  }
+
+  return widgets.slice(0, 8);
+}
+
+function systemUtilityRoot(element) {
+  let current = element;
+  while (current?.parentElement) {
+    const parentDescription = describeElement(current.parentElement);
+    if (!/accessibility|accessi|a11y|bmv|widget|plugin|floating|toolbar|overlay|assistive/i.test(parentDescription)) break;
+    current = current.parentElement;
+  }
+  return current;
 }
 
 function componentElements(root, selector) {
@@ -1587,9 +1705,15 @@ function describeElement(element) {
 
 
 // ---- src/page-archetype-classifier.js ----
+
 const ARCHETYPES = new Set([
   'landing',
   'service_landing',
+  'marketing_home',
+  'corporate_home',
+  'content_portal',
+  'education_portal',
+  'home_or_portal',
   'product_detail',
   'ecommerce_category',
   'checkout_or_form_flow',
@@ -1643,6 +1767,7 @@ function normalizeSignals(input, root) {
   const hasHero = Boolean(input.presenceOfHero ?? input.hasHero ?? headings.length > 0);
   const hasCtaGroups = Boolean(input.presenceOfCtaGroups ?? input.hasCtaGroups ?? (numeric(counts.ctaGroups) > 0 || matches(`${buttonText} ${ctaText}`, CTA_TERMS)));
   const hasCards = Boolean(input.presenceOfCards ?? input.hasCards ?? cards >= 3);
+  const dashboardStrongSignals = countMatches(joinedText, DASHBOARD_STRONG_TERMS) + (matches(url, [/\/app\//, /\/dashboard/, /\/admin/, /\/settings/, /\/workspace/]) ? 2 : 0);
 
   return {
     url,
@@ -1667,8 +1792,14 @@ function normalizeSignals(input, root) {
     hasCategoryTerms: matches(joinedText, CATEGORY_TERMS),
     hasServiceTerms: matches(joinedText, SERVICE_TERMS),
     hasLegalSupportTerms: matches(joinedText, LEGAL_SUPPORT_TERMS),
-    hasDashboardTerms: matches(joinedText, DASHBOARD_TERMS),
-    hasLandingTerms: matches(joinedText, LANDING_TERMS)
+    hasDashboardTerms: dashboardStrongSignals >= 2 || matches(joinedText, DASHBOARD_STRONG_TERMS),
+    dashboardStrongSignals,
+    hasLandingTerms: matches(joinedText, LANDING_TERMS),
+    hasHomeTerms: matches(joinedText, HOME_PORTAL_TERMS),
+    hasMarketingHomeTerms: matches(joinedText, MARKETING_HOME_TERMS),
+    hasCorporateHomeTerms: matches(joinedText, CORPORATE_HOME_TERMS),
+    hasContentPortalTerms: matches(joinedText, CONTENT_PORTAL_TERMS),
+    hasEducationPortalTerms: matches(joinedText, EDUCATION_PORTAL_TERMS)
   };
 }
 
@@ -1676,6 +1807,11 @@ function scoreArchetypes(signals) {
   return [
     scoreCheckout(signals),
     scoreDashboard(signals),
+    scoreEducationPortal(signals),
+    scoreContentPortal(signals),
+    scoreCorporateHome(signals),
+    scoreMarketingHome(signals),
+    scoreHomeOrPortal(signals),
     scoreArticle(signals),
     scoreEcommerceCategory(signals),
     scoreLegalSupport(signals),
@@ -1684,6 +1820,48 @@ function scoreArchetypes(signals) {
     scoreLanding(signals),
     { archetype: 'unknown', score: 0, signals: [] }
   ];
+}
+
+function scoreMarketingHome(signals) {
+  const result = createScore('marketing_home');
+  add(result, signals.hasHero, 1, 'Estructura de home con encabezados visibles.');
+  add(result, signals.hasMarketingHomeTerms || signals.hasLandingTerms, 2, 'Señales de propuesta, novedades, soluciones o navegación comercial.');
+  add(result, signals.hasCards, 1, 'Módulos o cards de acceso detectadas.');
+  add(result, !signals.hasCartCheckoutTerms && signals.productCards < 3, 1, 'No predominan señales de checkout ni listado de producto.');
+  return result;
+}
+
+function scoreCorporateHome(signals) {
+  const result = createScore('corporate_home');
+  add(result, signals.hasCorporateHomeTerms, 3, 'Señales corporativas, institucionales o de organización.');
+  add(result, signals.hasHomeTerms, 1, 'Texto compatible con home/portal.');
+  add(result, signals.hasCards || signals.hasHero, 1, 'Módulos de entrada o estructura de home detectada.');
+  return result;
+}
+
+function scoreContentPortal(signals) {
+  const result = createScore('content_portal');
+  add(result, signals.hasContentPortalTerms, 3, 'Señales de contenido, recursos, catálogo, noticias o búsqueda.');
+  add(result, signals.hasCards, 1, 'Múltiples módulos o entradas de contenido detectadas.');
+  add(result, !signals.hasHeroCtaStructure, 1, 'No predomina estructura de landing de conversión.');
+  return result;
+}
+
+function scoreEducationPortal(signals) {
+  const result = createScore('education_portal');
+  add(result, signals.hasEducationPortalTerms, 4, 'Señales de educación, libros, docentes, alumnado, centros o recursos didácticos.');
+  add(result, signals.hasContentPortalTerms, 1, 'Señales de catálogo, recursos o contenido editorial.');
+  add(result, signals.hasCards || signals.hasHero, 1, 'Estructura de portal con módulos de navegación.');
+  add(result, !signals.hasDashboardTerms, 1, 'No hay evidencia fuerte de aplicación autenticada.');
+  return result;
+}
+
+function scoreHomeOrPortal(signals) {
+  const result = createScore('home_or_portal');
+  add(result, signals.hasHomeTerms || matches(signals.url, [/\/$/, /\/home\b/, /\/inicio\b/]), 2, 'URL o contenido compatible con home/portal.');
+  add(result, signals.hasHero || signals.hasCards, 1, 'Estructura modular de entrada detectada.');
+  add(result, signals.hasContentPortalTerms || signals.hasCorporateHomeTerms || signals.hasMarketingHomeTerms, 1, 'Señales mixtas de navegación, contenido o marketing.');
+  return result;
 }
 
 function scoreLanding(signals) {
@@ -1743,9 +1921,9 @@ function scoreArticle(signals) {
 
 function scoreDashboard(signals) {
   const result = createScore('dashboard_or_app');
-  add(result, signals.hasDashboardTerms, 4, 'Señales de dashboard, workspace, ajustes o aplicación.');
-  add(result, matches(signals.url, [/\/app\//, /\/dashboard/, /\/admin/, /\/settings/]), 2, 'URL compatible con aplicación autenticada.');
-  add(result, signals.forms > 1 && !signals.hasHeroCtaStructure, 1, 'Múltiples controles sin estructura de landing.');
+  add(result, signals.dashboardStrongSignals >= 2, 5, 'Señales fuertes de dashboard, workspace, panel, ajustes o aplicación autenticada.');
+  add(result, matches(signals.url, [/\/app\//, /\/dashboard/, /\/admin/, /\/settings/, /\/workspace/]), 3, 'URL compatible con aplicación autenticada.');
+  add(result, signals.forms > 1 && !signals.hasHeroCtaStructure && signals.dashboardStrongSignals >= 1, 1, 'Múltiples controles junto a señales de herramienta interna.');
   return result;
 }
 
@@ -1782,14 +1960,22 @@ function analysisModeFor(archetype, confidence) {
 function readHeadings(root) {
   if (!root?.querySelectorAll) return [];
   return Array.from(root.querySelectorAll('h1, h2, h3'))
+    .filter(element => !isSystemUtilityWidget(element))
     .slice(0, 16)
     .map(element => compactWhitespace(element.textContent || ''))
     .filter(Boolean);
 }
 
 function readVisibleText(root) {
+  if (root?.__contexticBehavioralScope) return compactWhitespace(root.__contexticText || '');
   if (!root?.innerText && !root?.textContent) return '';
-  return compactWhitespace(root.innerText || root.textContent || '');
+  if (!root?.querySelectorAll) return compactWhitespace(root.innerText || root.textContent || '');
+  const text = Array.from(root.querySelectorAll('body, main, header, nav, section, article, aside, footer, h1, h2, h3, p, a, button, li'))
+    .filter(element => !isSystemUtilityWidget(element))
+    .filter(element => !hasSystemUtilityAncestor(element))
+    .map(element => element.textContent || '')
+    .join(' ');
+  return compactWhitespace(text || root.innerText || root.textContent || '');
 }
 
 function countProductCards(root, joinedText, fallbackCards) {
@@ -1834,6 +2020,19 @@ function numeric(...values) {
 
 function matches(text, patterns) {
   return patterns.some(pattern => pattern.test(String(text || '')));
+}
+
+function countMatches(text, patterns) {
+  return patterns.reduce((count, pattern) => count + (pattern.test(String(text || '')) ? 1 : 0), 0);
+}
+
+function hasSystemUtilityAncestor(element) {
+  let current = element.parentElement;
+  while (current) {
+    if (isSystemUtilityWidget(current)) return true;
+    current = current.parentElement;
+  }
+  return false;
 }
 
 function compactWhitespace(value) {
@@ -1885,14 +2084,39 @@ const LEGAL_SUPPORT_TERMS = [
   /\b(privacidad|términos|cookies|legal|soporte|ayuda|documentación|reembolso)\b/i
 ];
 
-const DASHBOARD_TERMS = [
-  /\b(dashboard|workspace|admin|settings|analytics|reports|projects|tasks|inbox|profile)\b/i,
-  /\b(panel|escritorio|administración|ajustes|analítica|informes|proyectos|tareas|bandeja|perfil)\b/i
+const DASHBOARD_STRONG_TERMS = [
+  /\b(dashboard|workspace|admin|settings|analytics|reports|inbox|authenticated|account settings|user profile|crud)\b/i,
+  /\b(panel de control|workspace|administración|ajustes|configuración|analítica|informes|bandeja|usuario autenticado|menú lateral|tabla de gestión|herramienta interna|estado operativo)\b/i
 ];
 
 const PRICING_TERMS = [
   /\b(price|pricing|from \$|from €|\$\d|€\d)\b/i,
   /\b(precio|precios|desde \$|desde €|\d+\s?€)\b/i
+];
+
+const HOME_PORTAL_TERMS = [
+  /\b(home|homepage|portal|welcome|featured|resources|catalog|search)\b/i,
+  /\b(inicio|home|portal|bienvenida|destacados|recursos|catálogo|búsqueda|actualidad|novedades)\b/i
+];
+
+const MARKETING_HOME_TERMS = [
+  /\b(company|solutions|products|services|customers|news|featured)\b/i,
+  /\b(empresa|soluciones|productos|servicios|clientes|novedades|destacados)\b/i
+];
+
+const CORPORATE_HOME_TERMS = [
+  /\b(corporate|about us|organization|institutional|foundation|team)\b/i,
+  /\b(corporativo|quiénes somos|organización|institucional|fundación|equipo|compromiso)\b/i
+];
+
+const CONTENT_PORTAL_TERMS = [
+  /\b(resources|articles|news|catalog|library|editorial|books|search)\b/i,
+  /\b(contenido|recursos|artículos|noticias|catálogo|biblioteca|editorial|libros|buscador|proyectos)\b/i
+];
+
+const EDUCATION_PORTAL_TERMS = [
+  /\b(education|school|teacher|student|families|classroom|textbook|didactic|learning|course)\b/i,
+  /\b(educación|educativo|educativa|docentes|profesorado|alumnado|estudiantes|familias|centros|aula|libros de texto|recursos didácticos|proyectos educativos|curso|bachillerato|primaria|secundaria|infantil)\b/i
 ];
 
 
@@ -1916,7 +2140,7 @@ const EXCLUDED_REASONS = {
   nav: 'global navigation excluded from behavioral scoring',
   footer: 'footer/contentinfo excluded from behavioral scoring',
   aside: 'aside/complementary content excluded from behavioral scoring',
-  hidden_or_system: 'hidden, skip, modal, cookie or system content excluded by default',
+  hidden_or_system: 'hidden, skip, modal, cookie, widget or system content excluded by default',
   unknown: 'unknown region excluded until manually reviewed'
 };
 
@@ -2031,6 +2255,7 @@ function isHiddenOrSystem(element) {
   const tag = element.tagName.toLowerCase();
   if (['script', 'style', 'noscript', 'template'].includes(tag)) return true;
   if (!isVisibleElement(element)) return true;
+  if (isSystemUtilityWidget(element)) return true;
   if (element.matches?.('[hidden], [aria-hidden="true"]')) return true;
 
   const ownClassAndId = `${element.id || ''} ${Array.from(element.classList || []).join(' ')}`.toLowerCase();
@@ -2275,6 +2500,7 @@ function slugify(value = 'finding') {
 
 // ---- src/hypotheses.js ----
 function generateHypotheses(findings = [], pageClassification = {}, context = {}) {
+  if (isPortalArchetype(pageClassification)) return [];
   const behavioralHypotheses = hypothesesFromBehavioralMapping(context.behavioralMapping || [], pageClassification);
   const rankedFindings = findings
     .filter(finding => shouldCreateHypothesis(finding, pageClassification))
@@ -2305,15 +2531,62 @@ function generateReviewTasks(findings = [], pageClassification = {}, context = {
     tasks.push(blockToReviewTask(block));
   }
 
+  if (isPortalArchetype(pageClassification)) {
+    tasks.push(...portalReviewTasks(pageClassification, context));
+  }
+
   return dedupeTasks(tasks).sort(compareReviewTasks).slice(0, 6).map((task, index) => ({ id: `R${index + 1}`, ...task }));
 }
 
 function shouldCreateHypothesis(finding, pageClassification = {}) {
   if (!finding) return false;
+  if (isPortalArchetype(pageClassification)) return false;
   if (finding.type === 'manual_review' && finding.confidence === 'low') return hasActionableExperimentInputs(finding);
   if (finding.confidence === 'low' && finding.priority === 'Review') return hasActionableExperimentInputs(finding);
   if (finding.type === 'design_system_debt') return pageClassification.analysisMode === 'design_system_audit' && hasConcreteEvidence(finding) && hasPrimaryMetric(finding);
   return hasConcreteEvidence(finding) && hasPrimaryMetric(finding) && (['medium', 'high'].includes(finding.confidence) || finding.impact === 'high');
+}
+
+function isPortalArchetype(pageClassification = {}) {
+  return ['home_or_portal', 'education_portal', 'content_portal', 'corporate_home', 'marketing_home'].includes(pageClassification.archetype);
+}
+
+function portalReviewTasks(pageClassification = {}, context = {}) {
+  const signals = (pageClassification.signals || []).join(' ').toLowerCase();
+  const tasks = [];
+  const isEducation = pageClassification.archetype === 'education_portal' || /educaci[oó]n|docentes|alumnado|centros|libros|recursos did[aá]cticos/.test(signals);
+
+  if (isEducation) {
+    tasks.push({
+      question: 'Validar si la home permite diferenciar rápidamente rutas para docentes, familias/estudiantes y centros.',
+      evidence: pageClassification.signals || ['Arquetipo de portal educativo detectado.'],
+      whyItMatters: 'Un portal educativo suele atender audiencias distintas; mezclar rutas puede aumentar desorientación y búsqueda improductiva.',
+      howToValidate: 'Revisar navegación principal, módulos de acceso, buscador/catálogo y primeras tareas por audiencia con contenido/producto.',
+      owner: 'content'
+    });
+  }
+
+  tasks.push({
+    question: '¿La home deja clara la orientación principal: contenido, catálogo, recursos o acceso institucional?',
+    evidence: pageClassification.signals || ['Arquetipo de home/portal detectado.'],
+    whyItMatters: 'En portales, la primera decisión suele ser elegir ruta, no convertir en un CTA único.',
+    howToValidate: 'Comprobar jerarquía de navegación, etiquetas de módulos, buscador y rutas principales antes de proponer cambios.',
+    owner: 'product/content'
+  });
+
+  const components = context.components || {};
+  const ctaGroups = Number(components.counts?.ctaGroups || 0);
+  if (ctaGroups > 0) {
+    tasks.push({
+      question: '¿La jerarquía de acciones diferencia rutas principales sin competir como CTAs de conversión?',
+      evidence: [`${ctaGroups} grupo(s) de acciones detectados en el inventario principal.`],
+      whyItMatters: 'Una home/portal necesita priorizar rutas por tarea o audiencia, no optimizar cada enlace como conversión.',
+      howToValidate: 'Mapear acciones visibles contra tareas principales y revisar si buscador/catálogo tienen peso suficiente.',
+      owner: 'design'
+    });
+  }
+
+  return tasks;
 }
 
 function findingToHypothesis(finding, pageClassification, number) {
@@ -3464,7 +3737,7 @@ function buildContexticReport(snapshot = {}) {
   const behavioralRecommendation = snapshot.behavioralRecommendation || {};
   const findings = snapshot.findings || buildFindings(snapshot);
   const hypotheses = snapshot.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping });
-  const reviewTasks = snapshot.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping });
+  const reviewTasks = snapshot.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping, components });
 
   return {
     meta: {
@@ -4812,7 +5085,7 @@ function createSnapshot() {
   const behavioralRecommendation = fullBehavioral ? buildBehavioralStructureRecommendation({ behavioralMapping, frictions }) : { sections: [] };
   const findings = buildFindings({ frictions, behavioralMapping });
   const hypotheses = generateHypotheses(findings, pageClassification, { behavioralMapping });
-  const reviewTasks = generateReviewTasks(findings, pageClassification, { behavioralMapping });
+  const reviewTasks = generateReviewTasks(findings, pageClassification, { behavioralMapping, components });
 
   return {
     meta: {
@@ -5494,6 +5767,10 @@ function renderPanel(snapshot) {
       tokenList(visualNoise, visualNoiseLabel, 'No se detecta ruido visual oculto del sistema.')
     ]),
     element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Widgets/utilidades externas detectadas']),
+      tokenList(snapshot.components.systemUtilityWidgets || [], systemWidgetLabel, 'No se detectaron widgets o utilidades externas visibles.')
+    ]),
+    element('section', { class: 'section' }, [
       element('h3', { class: 'section-title' }, ['Hallazgos de sistema']),
       ...(findingGroups.designSystem.length ? [element('div', { class: 'top-findings' }, findingCards(findingGroups.designSystem.slice(0, 4), 'Sistema'))] : [
         element('p', { class: 'notice' }, ['No hay hallazgos de sistema priorizados en esta captura.'])
@@ -5652,6 +5929,13 @@ function visualNoiseLabel(item = {}) {
   return {
     label: item.reason || item.value || item.name || 'Señal visual oculta',
     meta: item.count ? `${item.count} uso(s)` : 'revisar'
+  };
+}
+
+function systemWidgetLabel(item = {}) {
+  return {
+    label: item.selector || 'Widget externo detectado',
+    meta: item.type === 'accessibility_widget' ? 'accesibilidad' : 'utilidad'
   };
 }
 

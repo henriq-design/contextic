@@ -26,7 +26,7 @@ export function buildContexticReport(snapshot = {}) {
   const behavioralRecommendation = snapshot.behavioralRecommendation || {};
   const findings = snapshot.findings || buildFindings(snapshot);
   const hypotheses = snapshot.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping });
-  const reviewTasks = snapshot.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping });
+  const reviewTasks = snapshot.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping, components });
 
   return {
     meta: {

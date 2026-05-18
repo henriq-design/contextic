@@ -81,6 +81,37 @@ test('hidden/system modal does not count as active modal in primary component in
   assert.equal(components.samples.buttons[0].isUserFacing, true);
 });
 
+test('accessibility widget is excluded from primary component inventory and CTA groups', () => {
+  const root = tree('body', {}, [
+    tree('main', { className: 'main' }, [
+      tree('a', { text: 'Ver catálogo', attributes: { href: '/catalogo' }, rect: { width: 160, height: 44 } }),
+      tree('a', { text: 'Recursos docentes', attributes: { href: '/recursos' }, rect: { width: 160, height: 44 } })
+    ]),
+    tree('div', { className: 'bmv-widget accessibility-widget floating-toolbar', rect: { top: 0, width: 80, height: 120 } }, [
+      tree('button', {
+        id: 'accessibility-tab-button',
+        text: 'Accesibilidad',
+        className: 'accessibility-tab-button',
+        rect: { top: 0, width: 56, height: 56 }
+      }),
+      tree('button', {
+        text: 'Contraste',
+        className: 'bmv-button',
+        rect: { top: 56, width: 56, height: 56 }
+      })
+    ])
+  ]);
+
+  const components = collectComponents(root);
+
+  assert.equal(components.counts.buttons, 0);
+  assert.equal(components.counts.links, 2);
+  assert.equal(components.counts.ctaGroups, 1);
+  assert.equal(components.systemHiddenComponents.buttons, 2);
+  assert.equal(components.systemUtilityWidgets.length, 1);
+  assert.equal(components.systemUtilityWidgets[0].type, 'accessibility_widget');
+});
+
 function tree(tag, options = {}, children = []) {
   return new FakeElement(tag, options, children);
 }
@@ -110,6 +141,8 @@ function matchesSimpleSelector(element, selector) {
   if (inputType) return tag === 'input' && element.getAttribute('type') === inputType[1];
   const classContains = selector.match(/^\[class\*="([^"]+)"\]$/);
   if (classContains) return element.classList.some(item => item.includes(classContains[1]));
+  const idContains = selector.match(/^\[id\*="([^"]+)"\]$/);
+  if (idContains) return element.id.includes(idContains[1]);
   const classSelector = selector.match(/^\.([a-z0-9_-]+)$/i);
   if (classSelector) return element.classList.includes(classSelector[1]);
   return false;

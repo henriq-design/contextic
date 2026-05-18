@@ -59,6 +59,28 @@ test('classifies an article/blog page without full behavioral analysis', () => {
   assert.equal(classification.analysisMode, 'limited_behavioral');
 });
 
+test('classifies an education home portal without treating accessibility widget text as an app dashboard', () => {
+  const classification = pageArchetypeClassifier({
+    url: 'https://www.anayaeducacion.es/',
+    title: 'Anaya Educación - Libros de texto y recursos didácticos',
+    headings: ['Anaya Educación', 'Proyectos educativos', 'Recursos para docentes'],
+    visibleText: 'Libros de texto Recursos didácticos Catálogo Educación Infantil Primaria Secundaria Bachillerato Docentes Alumnado Centros accessibility widget panel configuración toolbar',
+    components: {
+      counts: { buttons: 2, cards: 6, ctaGroups: 0, forms: 0 },
+      samples: {
+        buttons: [{ text: 'Buscar en catálogo' }, { text: 'Acceso docentes' }],
+        ctaGroups: []
+      }
+    },
+    presenceOfHero: true
+  });
+
+  assert.equal(classification.archetype, 'education_portal');
+  assert.notEqual(classification.archetype, 'dashboard_or_app');
+  assert.equal(classification.analysisMode, 'limited_behavioral');
+  assert.ok(['medium', 'low'].includes(classification.confidence));
+});
+
 test('keeps weak evidence as unknown snapshot only', () => {
   const classification = pageArchetypeClassifier({
     url: 'https://example.com/random',

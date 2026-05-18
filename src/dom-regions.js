@@ -1,4 +1,4 @@
-import { compactText, isVisibleElement } from './utils.js';
+import { compactText, isSystemUtilityWidget, isVisibleElement } from './utils.js';
 
 const REGION_TYPES = [
   'header',
@@ -18,7 +18,7 @@ const EXCLUDED_REASONS = {
   nav: 'global navigation excluded from behavioral scoring',
   footer: 'footer/contentinfo excluded from behavioral scoring',
   aside: 'aside/complementary content excluded from behavioral scoring',
-  hidden_or_system: 'hidden, skip, modal, cookie or system content excluded by default',
+  hidden_or_system: 'hidden, skip, modal, cookie, widget or system content excluded by default',
   unknown: 'unknown region excluded until manually reviewed'
 };
 
@@ -133,6 +133,7 @@ function isHiddenOrSystem(element) {
   const tag = element.tagName.toLowerCase();
   if (['script', 'style', 'noscript', 'template'].includes(tag)) return true;
   if (!isVisibleElement(element)) return true;
+  if (isSystemUtilityWidget(element)) return true;
   if (element.matches?.('[hidden], [aria-hidden="true"]')) return true;
 
   const ownClassAndId = `${element.id || ''} ${Array.from(element.classList || []).join(' ')}`.toLowerCase();

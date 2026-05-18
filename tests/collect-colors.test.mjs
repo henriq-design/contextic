@@ -296,6 +296,103 @@ test('css variables are annotated with visible usage status', () => {
   document.documentElement = new FakeElement('html', { style: { length: 0 } });
 });
 
+test('accessibility widget colors and bmv variables are treated as system utility noise', () => {
+  const rootStyle = {
+    length: 2,
+    0: '--bmv-primary',
+    1: '--page-primary',
+    getPropertyValue(name) {
+      return name === '--bmv-primary' ? '#000000' : '#2255aa';
+    }
+  };
+  document.documentElement = new FakeElement('html', { style: rootStyle });
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('a', {
+        text: 'Ver catálogo',
+        className: 'cta',
+        attributes: { href: '/catalogo' },
+        style: { backgroundColor: '#2255aa', color: '#ffffff' }
+      })
+    ]),
+    tree('button', {
+      id: 'accessibility-tab-button',
+      className: 'accessibility-tab-button bmv-widget',
+      attributes: { 'aria-label': 'Accessibility toolbar' },
+      style: { backgroundColor: '#000000', color: '#ffffff' },
+      rect: { top: 0, width: 56, height: 56 }
+    })
+  ]);
+
+  const result = collectColors(root);
+
+  assert.equal(result.colors.some(color => color.value === '#000000'), false);
+  assert.ok(result.systemHiddenVisualNoise.find(color => color.value === '#000000'));
+  assert.equal(result.cssVariables.find(variable => variable.name === '--bmv-primary').usageStatus, 'third-party/accessibility-widget usage');
+  assert.equal(result.cssVariables.find(variable => variable.name === '--bmv-primary').systemUtility, true);
+  document.documentElement = new FakeElement('html', { style: { length: 0 } });
+});
+
+test('white background samples are not explained as text color usage', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('section', {
+        className: 'panel',
+        style: { backgroundColor: '#ffffff' }
+      })
+    ])
+  ]);
+
+  const white = collectColors(root).colors.find(color => color.value === '#ffffff');
+
+  assert.ok(white);
+  assert.equal(white.sample.property, 'backgroundColor');
+  assert.notEqual(white.suggestedRole, 'text');
+  assert.doesNotMatch(white.roleReason, /color mapea a texto/i);
+});
+
+test('yellow text alone is not inferred as primary', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('span', {
+        text: 'Destacado editorial',
+        style: { color: '#ffc602' }
+      })
+    ])
+  ]);
+
+  const yellow = collectColors(root).colors.find(color => color.value === '#ffc602');
+
+  assert.ok(yellow);
+  assert.equal(yellow.sample.property, 'color');
+  assert.notEqual(yellow.suggestedRole, 'primary');
+});
+
+test('yellow CTA background uses CTA context as observed sample', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('span', {
+        text: 'Destacado editorial',
+        style: { color: '#ffc602' }
+      }),
+      tree('a', {
+        text: 'Ver catálogo',
+        className: 'cta primary',
+        attributes: { href: '/catalogo' },
+        style: { backgroundColor: '#ffc602' }
+      })
+    ])
+  ]);
+
+  const yellow = collectColors(root).colors.find(color => color.value === '#ffc602');
+
+  assert.ok(yellow);
+  assert.equal(yellow.suggestedRole, 'primary');
+  assert.equal(yellow.sample.property, 'backgroundColor');
+  assert.equal(yellow.sample.context.appearsInCta, true);
+  assert.match(yellow.roleReason, /CTA|acción principal/i);
+});
+
 test('grey borderTopColor is classified as border', () => {
   const root = tree('body', {}, [
     tree('main', {}, [

@@ -23,6 +23,7 @@ export function collectComponents(root = document.body) {
   const badges = userFacingElements(allBadges);
   const dialogs = userFacingElements(allDialogs);
   const ctaGroups = findCtaGroups(buttons, links);
+  const systemUtilityWidgets = detectSystemUtilityWidgets(root);
 
   const buttonSamples = buttons.slice(0, 8).map(element => ({
     text: getAccessibleName(element),
@@ -62,6 +63,7 @@ export function collectComponents(root = document.body) {
       badges: allBadges.length - badges.length,
       dialogs: allDialogs.length - dialogs.length
     },
+    systemUtilityWidgets,
     samples: {
       buttons: buttonSamples,
       unlabeledInputs: unlabeledInputs.slice(0, 8).map(describeElement),
@@ -84,6 +86,35 @@ export function collectComponents(root = document.body) {
       allInputs
     }
   };
+}
+
+function detectSystemUtilityWidgets(root) {
+  const seen = new Set();
+  const widgets = [];
+
+  for (const item of componentElements(root, 'button, [role="button"], [class*="accessibility"], [class*="accessi"], [class*="a11y"], [class*="bmv"], [class*="widget"], [class*="toolbar"], [class*="assistive"], [id*="accessibility"], [id*="bmv"]')) {
+    if (!item.context.isSystemOrHidden) continue;
+    const element = systemUtilityRoot(item.element);
+    if (seen.has(element)) continue;
+    seen.add(element);
+    widgets.push({
+      type: /accessibility|accessi|a11y|bmv|assistive/i.test(describeElement(element)) ? 'accessibility_widget' : 'system_utility',
+      selector: describeElement(element),
+      region: item.context.region
+    });
+  }
+
+  return widgets.slice(0, 8);
+}
+
+function systemUtilityRoot(element) {
+  let current = element;
+  while (current?.parentElement) {
+    const parentDescription = describeElement(current.parentElement);
+    if (!/accessibility|accessi|a11y|bmv|widget|plugin|floating|toolbar|overlay|assistive/i.test(parentDescription)) break;
+    current = current.parentElement;
+  }
+  return current;
 }
 
 function componentElements(root, selector) {

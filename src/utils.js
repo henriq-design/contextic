@@ -84,3 +84,54 @@ export function getAccessibleName(element) {
 
   return compactText(element.textContent || element.getAttribute('placeholder') || element.getAttribute('title') || '');
 }
+
+export function isSystemUtilityWidget(element) {
+  if (!(element instanceof Element)) return false;
+
+  const descriptors = elementAncestry(element).map(item => elementDescriptor(item));
+  const ownDescriptor = descriptors[0] || '';
+  const ancestryDescriptor = descriptors.join(' ');
+  const hasWidgetSignal = /\b(accessibility|accessi|a11y|bmv|widget|plugin|floating|toolbar|overlay|assistive)\b/i.test(ancestryDescriptor);
+  if (!hasWidgetSignal) return false;
+
+  const hasStrongAccessibilitySignal = /\b(accessibility|accessi|a11y|bmv|assistive)\b/i.test(ancestryDescriptor);
+  const hasUtilityShellSignal = /\b(widget|plugin|floating|toolbar|overlay|tab-button|accessibility-tab)\b/i.test(ancestryDescriptor);
+  const hasFloatingGeometry = isFloatingUtilityElement(element);
+
+  return hasStrongAccessibilitySignal || (hasUtilityShellSignal && (hasFloatingGeometry || /\b(widget|plugin|toolbar|overlay)\b/i.test(ownDescriptor)));
+}
+
+function isFloatingUtilityElement(element) {
+  const rect = element.getBoundingClientRect?.();
+  if (!rect) return false;
+  const viewportWidth = window.innerWidth || 1200;
+  const viewportHeight = window.innerHeight || 900;
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  return rect.top <= 24 || rect.left <= 24 || rect.right >= viewportWidth - 24 || rect.bottom >= viewportHeight - 24;
+}
+
+function elementAncestry(element) {
+  const items = [];
+  let current = element;
+  while (current) {
+    items.push(current);
+    current = current.parentElement;
+  }
+  return items;
+}
+
+function elementDescriptor(element) {
+  const id = element.id || '';
+  const classes = Array.from(element.classList || []).join(' ');
+  const attributes = elementAttributes(element)
+    .filter(attribute => /^(class|id|data-|aria-|role)/i.test(attribute.name || ''))
+    .map(attribute => `${attribute.name || ''} ${attribute.value || ''}`)
+    .join(' ');
+  return `${id} ${classes} ${attributes}`.toLowerCase();
+}
+
+function elementAttributes(element) {
+  if (!element?.attributes) return [];
+  if (typeof element.attributes[Symbol.iterator] === 'function') return Array.from(element.attributes);
+  return Object.entries(element.attributes).map(([name, value]) => ({ name, value }));
+}

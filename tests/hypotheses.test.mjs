@@ -81,6 +81,37 @@ test('design system debt becomes review task outside design system audit mode', 
   assert.equal(reviewTasks[0].owner, 'design-system');
 });
 
+test('education portal creates lightweight review tasks without A/B hypotheses', () => {
+  const portal = {
+    archetype: 'education_portal',
+    confidence: 'medium',
+    analysisMode: 'limited_behavioral',
+    signals: ['Señales de educación, libros, docentes, alumnado, centros o recursos didácticos.']
+  };
+  const finding = {
+    id: 'where.cta-clarity',
+    type: 'conversion_risk',
+    title: 'CTA principal poco claro',
+    evidence: ['CTA detectado: "Entrar".'],
+    affectedArea: 'where',
+    severity: 3,
+    confidence: 'high',
+    impact: 'high',
+    effort: 'low',
+    priority: 'P1',
+    rationale: 'CTA de alto impacto con evidencia textual.'
+  };
+
+  const hypotheses = generateHypotheses([finding], portal);
+  const reviewTasks = generateReviewTasks([finding], portal, {
+    components: { counts: { ctaGroups: 1 } }
+  });
+
+  assert.deepEqual(hypotheses, []);
+  assert.ok(reviewTasks.some(task => /docentes, familias\/estudiantes y centros/.test(task.question)));
+  assert.ok(reviewTasks.some(task => /jerarquía de acciones/.test(task.question)));
+});
+
 test('no high-confidence finding does not create baseline review task', () => {
   const hypotheses = generateHypotheses([], landing);
   const reviewTasks = generateReviewTasks([], landing);

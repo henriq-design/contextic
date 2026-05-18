@@ -67,9 +67,9 @@ export function collectColors(root = document.body, options = {}) {
   }
 
   const colors = topFromMap(userFacingColorUsage, limit).map(item => {
-    const sample = userFacingColorSamples.get(item.value) || colorSamples.get(item.value);
     const contexts = colorContexts.get(item.value) || [];
     const role = classifyColorUsage({ value: item.value, count: item.count, contexts, cssVariables });
+    const sample = sampleForRole(item.value, role, contexts, userFacingColorSamples, colorSamples);
     return {
       ...item,
       sample,
@@ -82,7 +82,7 @@ export function collectColors(root = document.body, options = {}) {
     };
   });
   const systemHiddenVisualNoise = topFromMap(systemColorUsage, 8)
-    .filter(item => !userFacingColorUsage.has(item.value))
+    .filter(item => item.count >= (userFacingColorUsage.get(item.value) || 0))
     .map(item => {
       const contexts = colorContexts.get(item.value) || [];
       const role = classifyColorUsage({ value: item.value, count: item.count, contexts, cssVariables });
@@ -160,11 +160,22 @@ function annotateCssVariableUsage(cssVariables, colorContexts) {
     const normalized = normalizeColor(variable.value);
     const contexts = normalized ? colorContexts.get(normalized) || [] : [];
     const visibleUse = contexts.some(context => context.isUserFacing);
+    const systemUse = contexts.some(context => context.isSystemOrHidden);
+    const isThirdPartySystem = isThirdPartySystemVariable(variable.name) || (systemUse && !visibleUse);
     return {
       ...variable,
-      usageStatus: visibleUse ? 'used visible' : contexts.length ? 'declared only' : 'unknown usage'
+      usageStatus: isThirdPartySystem
+        ? 'third-party/accessibility-widget usage'
+        : visibleUse
+          ? 'used visible'
+          : contexts.length ? 'declared only' : 'unknown usage',
+      systemUtility: isThirdPartySystem
     };
   });
+}
+
+function isThirdPartySystemVariable(name = '') {
+  return /^--bmv-/i.test(name) || /\b(accessibility|accessi|a11y|assistive|widget|plugin)\b/i.test(name);
 }
 
 function inferComponentType(element) {
@@ -299,6 +310,10 @@ export function classifyColorUsage(colorUsage = {}) {
 
   if (!relevantContexts.length) return role('utility', 'low', 'Solo observado en contextos ocultos, de sistema o utilidad.', 'base_css_property');
 
+  if (isActionColor(relevantContexts)) {
+    return role('primary', variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) ? 'high' : 'medium', variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) ? 'Variable brand/primary usada como fondo de una acción principal visible.' : 'Usado como backgroundColor en un CTA o acción principal visible.', 'cta_context');
+  }
+
   const baseRole = baseRoleFromCssProperty(hex, count, relevantContexts, variableHints, { luminance, saturation });
   if (baseRole.role === 'shadow') return baseRole;
   if (baseRole.role === 'text' && (isNeutralHex(hex) || luminance > 0.92) && !hasExplicitSemanticToken(variableHints)) return baseRole;
@@ -309,18 +324,39 @@ export function classifyColorUsage(colorUsage = {}) {
     return role(semanticRole.role, confidence, semanticRole.reason, 'semantic_component');
   }
 
-  if (variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) && isActionColor(relevantContexts)) {
-    return role('primary', 'high', 'Variable brand/primary usada en una acción principal visible.', 'cta_context');
-  }
   if (variableHints.some(name => /\b(brand)\b/.test(name))) return role('brand', 'medium', 'Color expuesto mediante una variable CSS de marca.', 'brand_context');
 
-  if (isActionColor(relevantContexts)) {
-    return role('primary', 'medium', 'Usado como backgroundColor en un CTA o acción principal visible.', 'cta_context');
-  }
   if (relevantContexts.some(context => context.componentType === 'brand_asset')) return role('brand', 'medium', 'Usado en logo o asset de marca visible.', 'brand_context');
 
   if (variableHints.some(name => /\b(accent|secondary)\b/.test(name))) return role(variableHints.some(name => name.includes('secondary')) ? 'secondary' : 'accent', 'medium', 'Rol inferido desde variable CSS y uso visible.', 'brand_context');
   return baseRole;
+}
+
+function sampleForRole(value, roleInfo, contexts, userFacingColorSamples, colorSamples) {
+  const normalizedRole = roleInfo.role;
+  const source = roleInfo.source;
+  const relevantContexts = contexts.filter(context => context.isUserFacing);
+  const match = relevantContexts.find(context => {
+    const property = normalizeCssProperty(context.property);
+    if (source === 'cta_context') return property === 'backgroundcolor' && context.appearsInCta;
+    if (normalizedRole === 'surface') return property === 'backgroundcolor';
+    if (normalizedRole === 'text') return property === 'color';
+    if (normalizedRole === 'border') return property.includes('border');
+    if (normalizedRole === 'focus') return property === 'outline' || property === 'outlinecolor';
+    if (normalizedRole === 'shadow') return property === 'boxshadow' || property === 'textshadow';
+    if (['error', 'success', 'warning', 'info'].includes(normalizedRole)) return context.semanticContext === normalizedRole;
+    return true;
+  });
+
+  if (match) {
+    return {
+      selector: match.selector,
+      property: match.property,
+      context: match
+    };
+  }
+
+  return userFacingColorSamples.get(value) || colorSamples.get(value);
 }
 
 function role(roleName, confidence, reason, source = 'fallback') {

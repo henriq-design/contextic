@@ -1,6 +1,13 @@
+import { isSystemUtilityWidget } from './utils.js';
+
 const ARCHETYPES = new Set([
   'landing',
   'service_landing',
+  'marketing_home',
+  'corporate_home',
+  'content_portal',
+  'education_portal',
+  'home_or_portal',
   'product_detail',
   'ecommerce_category',
   'checkout_or_form_flow',
@@ -54,6 +61,7 @@ function normalizeSignals(input, root) {
   const hasHero = Boolean(input.presenceOfHero ?? input.hasHero ?? headings.length > 0);
   const hasCtaGroups = Boolean(input.presenceOfCtaGroups ?? input.hasCtaGroups ?? (numeric(counts.ctaGroups) > 0 || matches(`${buttonText} ${ctaText}`, CTA_TERMS)));
   const hasCards = Boolean(input.presenceOfCards ?? input.hasCards ?? cards >= 3);
+  const dashboardStrongSignals = countMatches(joinedText, DASHBOARD_STRONG_TERMS) + (matches(url, [/\/app\//, /\/dashboard/, /\/admin/, /\/settings/, /\/workspace/]) ? 2 : 0);
 
   return {
     url,
@@ -78,8 +86,14 @@ function normalizeSignals(input, root) {
     hasCategoryTerms: matches(joinedText, CATEGORY_TERMS),
     hasServiceTerms: matches(joinedText, SERVICE_TERMS),
     hasLegalSupportTerms: matches(joinedText, LEGAL_SUPPORT_TERMS),
-    hasDashboardTerms: matches(joinedText, DASHBOARD_TERMS),
-    hasLandingTerms: matches(joinedText, LANDING_TERMS)
+    hasDashboardTerms: dashboardStrongSignals >= 2 || matches(joinedText, DASHBOARD_STRONG_TERMS),
+    dashboardStrongSignals,
+    hasLandingTerms: matches(joinedText, LANDING_TERMS),
+    hasHomeTerms: matches(joinedText, HOME_PORTAL_TERMS),
+    hasMarketingHomeTerms: matches(joinedText, MARKETING_HOME_TERMS),
+    hasCorporateHomeTerms: matches(joinedText, CORPORATE_HOME_TERMS),
+    hasContentPortalTerms: matches(joinedText, CONTENT_PORTAL_TERMS),
+    hasEducationPortalTerms: matches(joinedText, EDUCATION_PORTAL_TERMS)
   };
 }
 
@@ -87,6 +101,11 @@ function scoreArchetypes(signals) {
   return [
     scoreCheckout(signals),
     scoreDashboard(signals),
+    scoreEducationPortal(signals),
+    scoreContentPortal(signals),
+    scoreCorporateHome(signals),
+    scoreMarketingHome(signals),
+    scoreHomeOrPortal(signals),
     scoreArticle(signals),
     scoreEcommerceCategory(signals),
     scoreLegalSupport(signals),
@@ -95,6 +114,48 @@ function scoreArchetypes(signals) {
     scoreLanding(signals),
     { archetype: 'unknown', score: 0, signals: [] }
   ];
+}
+
+function scoreMarketingHome(signals) {
+  const result = createScore('marketing_home');
+  add(result, signals.hasHero, 1, 'Estructura de home con encabezados visibles.');
+  add(result, signals.hasMarketingHomeTerms || signals.hasLandingTerms, 2, 'Señales de propuesta, novedades, soluciones o navegación comercial.');
+  add(result, signals.hasCards, 1, 'Módulos o cards de acceso detectadas.');
+  add(result, !signals.hasCartCheckoutTerms && signals.productCards < 3, 1, 'No predominan señales de checkout ni listado de producto.');
+  return result;
+}
+
+function scoreCorporateHome(signals) {
+  const result = createScore('corporate_home');
+  add(result, signals.hasCorporateHomeTerms, 3, 'Señales corporativas, institucionales o de organización.');
+  add(result, signals.hasHomeTerms, 1, 'Texto compatible con home/portal.');
+  add(result, signals.hasCards || signals.hasHero, 1, 'Módulos de entrada o estructura de home detectada.');
+  return result;
+}
+
+function scoreContentPortal(signals) {
+  const result = createScore('content_portal');
+  add(result, signals.hasContentPortalTerms, 3, 'Señales de contenido, recursos, catálogo, noticias o búsqueda.');
+  add(result, signals.hasCards, 1, 'Múltiples módulos o entradas de contenido detectadas.');
+  add(result, !signals.hasHeroCtaStructure, 1, 'No predomina estructura de landing de conversión.');
+  return result;
+}
+
+function scoreEducationPortal(signals) {
+  const result = createScore('education_portal');
+  add(result, signals.hasEducationPortalTerms, 4, 'Señales de educación, libros, docentes, alumnado, centros o recursos didácticos.');
+  add(result, signals.hasContentPortalTerms, 1, 'Señales de catálogo, recursos o contenido editorial.');
+  add(result, signals.hasCards || signals.hasHero, 1, 'Estructura de portal con módulos de navegación.');
+  add(result, !signals.hasDashboardTerms, 1, 'No hay evidencia fuerte de aplicación autenticada.');
+  return result;
+}
+
+function scoreHomeOrPortal(signals) {
+  const result = createScore('home_or_portal');
+  add(result, signals.hasHomeTerms || matches(signals.url, [/\/$/, /\/home\b/, /\/inicio\b/]), 2, 'URL o contenido compatible con home/portal.');
+  add(result, signals.hasHero || signals.hasCards, 1, 'Estructura modular de entrada detectada.');
+  add(result, signals.hasContentPortalTerms || signals.hasCorporateHomeTerms || signals.hasMarketingHomeTerms, 1, 'Señales mixtas de navegación, contenido o marketing.');
+  return result;
 }
 
 function scoreLanding(signals) {
@@ -154,9 +215,9 @@ function scoreArticle(signals) {
 
 function scoreDashboard(signals) {
   const result = createScore('dashboard_or_app');
-  add(result, signals.hasDashboardTerms, 4, 'Señales de dashboard, workspace, ajustes o aplicación.');
-  add(result, matches(signals.url, [/\/app\//, /\/dashboard/, /\/admin/, /\/settings/]), 2, 'URL compatible con aplicación autenticada.');
-  add(result, signals.forms > 1 && !signals.hasHeroCtaStructure, 1, 'Múltiples controles sin estructura de landing.');
+  add(result, signals.dashboardStrongSignals >= 2, 5, 'Señales fuertes de dashboard, workspace, panel, ajustes o aplicación autenticada.');
+  add(result, matches(signals.url, [/\/app\//, /\/dashboard/, /\/admin/, /\/settings/, /\/workspace/]), 3, 'URL compatible con aplicación autenticada.');
+  add(result, signals.forms > 1 && !signals.hasHeroCtaStructure && signals.dashboardStrongSignals >= 1, 1, 'Múltiples controles junto a señales de herramienta interna.');
   return result;
 }
 
@@ -193,14 +254,22 @@ function analysisModeFor(archetype, confidence) {
 function readHeadings(root) {
   if (!root?.querySelectorAll) return [];
   return Array.from(root.querySelectorAll('h1, h2, h3'))
+    .filter(element => !isSystemUtilityWidget(element))
     .slice(0, 16)
     .map(element => compactWhitespace(element.textContent || ''))
     .filter(Boolean);
 }
 
 function readVisibleText(root) {
+  if (root?.__contexticBehavioralScope) return compactWhitespace(root.__contexticText || '');
   if (!root?.innerText && !root?.textContent) return '';
-  return compactWhitespace(root.innerText || root.textContent || '');
+  if (!root?.querySelectorAll) return compactWhitespace(root.innerText || root.textContent || '');
+  const text = Array.from(root.querySelectorAll('body, main, header, nav, section, article, aside, footer, h1, h2, h3, p, a, button, li'))
+    .filter(element => !isSystemUtilityWidget(element))
+    .filter(element => !hasSystemUtilityAncestor(element))
+    .map(element => element.textContent || '')
+    .join(' ');
+  return compactWhitespace(text || root.innerText || root.textContent || '');
 }
 
 function countProductCards(root, joinedText, fallbackCards) {
@@ -245,6 +314,19 @@ function numeric(...values) {
 
 function matches(text, patterns) {
   return patterns.some(pattern => pattern.test(String(text || '')));
+}
+
+function countMatches(text, patterns) {
+  return patterns.reduce((count, pattern) => count + (pattern.test(String(text || '')) ? 1 : 0), 0);
+}
+
+function hasSystemUtilityAncestor(element) {
+  let current = element.parentElement;
+  while (current) {
+    if (isSystemUtilityWidget(current)) return true;
+    current = current.parentElement;
+  }
+  return false;
 }
 
 function compactWhitespace(value) {
@@ -296,12 +378,37 @@ const LEGAL_SUPPORT_TERMS = [
   /\b(privacidad|términos|cookies|legal|soporte|ayuda|documentación|reembolso)\b/i
 ];
 
-const DASHBOARD_TERMS = [
-  /\b(dashboard|workspace|admin|settings|analytics|reports|projects|tasks|inbox|profile)\b/i,
-  /\b(panel|escritorio|administración|ajustes|analítica|informes|proyectos|tareas|bandeja|perfil)\b/i
+const DASHBOARD_STRONG_TERMS = [
+  /\b(dashboard|workspace|admin|settings|analytics|reports|inbox|authenticated|account settings|user profile|crud)\b/i,
+  /\b(panel de control|workspace|administración|ajustes|configuración|analítica|informes|bandeja|usuario autenticado|menú lateral|tabla de gestión|herramienta interna|estado operativo)\b/i
 ];
 
 const PRICING_TERMS = [
   /\b(price|pricing|from \$|from €|\$\d|€\d)\b/i,
   /\b(precio|precios|desde \$|desde €|\d+\s?€)\b/i
+];
+
+const HOME_PORTAL_TERMS = [
+  /\b(home|homepage|portal|welcome|featured|resources|catalog|search)\b/i,
+  /\b(inicio|home|portal|bienvenida|destacados|recursos|catálogo|búsqueda|actualidad|novedades)\b/i
+];
+
+const MARKETING_HOME_TERMS = [
+  /\b(company|solutions|products|services|customers|news|featured)\b/i,
+  /\b(empresa|soluciones|productos|servicios|clientes|novedades|destacados)\b/i
+];
+
+const CORPORATE_HOME_TERMS = [
+  /\b(corporate|about us|organization|institutional|foundation|team)\b/i,
+  /\b(corporativo|quiénes somos|organización|institucional|fundación|equipo|compromiso)\b/i
+];
+
+const CONTENT_PORTAL_TERMS = [
+  /\b(resources|articles|news|catalog|library|editorial|books|search)\b/i,
+  /\b(contenido|recursos|artículos|noticias|catálogo|biblioteca|editorial|libros|buscador|proyectos)\b/i
+];
+
+const EDUCATION_PORTAL_TERMS = [
+  /\b(education|school|teacher|student|families|classroom|textbook|didactic|learning|course)\b/i,
+  /\b(educación|educativo|educativa|docentes|profesorado|alumnado|estudiantes|familias|centros|aula|libros de texto|recursos didácticos|proyectos educativos|curso|bachillerato|primaria|secundaria|infantil)\b/i
 ];
