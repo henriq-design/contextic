@@ -41,7 +41,7 @@ function createSnapshot() {
   const frictions = fullBehavioral ? detectFrictions({ colors, typography, spacing, components: behavioralComponents }, scopeMap.behavioralRoot) : [];
   const behavioralMapping = fullBehavioral ? buildBehavioralMapping({ components: behavioralComponents, frictions }, scopeMap.behavioralRoot) : [];
   const behavioralRecommendation = fullBehavioral ? buildBehavioralStructureRecommendation({ behavioralMapping, frictions }) : { sections: [] };
-  const findings = buildFindings({ frictions, behavioralMapping });
+  const findings = buildFindings({ frictions, behavioralMapping, components, pageClassification });
   const hypotheses = generateHypotheses(findings, pageClassification, { behavioralMapping });
   const reviewTasks = generateReviewTasks(findings, pageClassification, { behavioralMapping, components });
 
@@ -175,12 +175,15 @@ function renderPanel(snapshot) {
         transition: transform 120ms cubic-bezier(0.2, 0, 0, 1), background-color 120ms cubic-bezier(0.2, 0, 0, 1);
       }
       .body {
+        min-height: 0;
+        flex: 1 1 auto;
         overflow: auto;
         padding: 0;
+        padding-bottom: 16px;
       }
       .tabs {
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 4px;
         padding: 10px;
         border-bottom: 1px solid #d7ded8;
@@ -495,7 +498,17 @@ function renderPanel(snapshot) {
       .actions {
         display: grid;
         gap: 8px;
-        margin-top: 12px;
+      }
+      .panel-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        display: grid;
+        gap: 8px;
+        padding: 10px 14px 12px;
+        border-top: 1px solid #d7ded8;
+        background: #ffffff;
+        box-shadow: 0 -12px 30px rgba(22, 34, 28, 0.08);
       }
       .secondary-actions {
         display: grid;
@@ -567,6 +580,8 @@ function renderPanel(snapshot) {
       ? 'No se detectan fricciones UX de alta confianza. Hay bloques que conviene revisar.'
       : classification.analysisMode === 'full_behavioral'
         ? 'No se detectan fricciones UX de alta confianza.'
+        : classification.analysisMode === 'app_usability_review'
+          ? 'Sin fricciones UX de alta confianza. Hay revisiones de app recomendadas.'
         : 'Análisis conductual limitado por arquetipo de página.';
   const componentSummary = `Botones ${snapshot.components.counts.buttons} · Inputs ${snapshot.components.counts.inputs} · Enlaces ${snapshot.components.counts.links} · Tarjetas ${snapshot.components.counts.cards}`;
 
@@ -618,12 +633,12 @@ function renderPanel(snapshot) {
   ]));
 
   const copyButtons = [
-    element('button', { class: 'copy primary', type: 'button', 'data-copy': 'design' }, ['Copiar design-context.md']),
-    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'json' }, ['Copiar JSON']),
-    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'issue' }, ['Copiar issue de GitHub'])
+    element('button', { class: 'copy primary', type: 'button', 'data-copy': 'design', 'aria-label': 'Copiar design-context.md' }, ['Copiar design-context.md']),
+    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'json', 'aria-label': 'Copiar JSON' }, ['Copiar JSON']),
+    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'issue', 'aria-label': 'Copiar issue GitHub' }, ['Copiar issue GitHub'])
   ];
 
-  const copyStatus = element('p', { class: 'notice', 'data-copy-status': '' }, [
+  const copyStatus = element('p', { class: 'notice', 'data-copy-status': '', 'aria-live': 'polite' }, [
     'Salida heurística. Úsala como apoyo de revisión de producto/diseño, no como verdad absoluta.'
   ]);
 
@@ -674,6 +689,16 @@ function renderPanel(snapshot) {
       ...(snapshot.reviewTasks.length ? [element('div', { class: 'detail-grid' }, reviewTaskCards(snapshot.reviewTasks))] : [
         element('p', { class: 'notice' }, ['No hay tareas de revisión prioritarias con la evidencia actual.'])
       ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Resumen para traspaso']),
+      element('div', { class: 'detail-card' }, [
+        element('p', {}, [handoffSummary(snapshot, summaryText)])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Métricas recomendadas']),
+      tokenList(recommendedMetrics(snapshot), metricLabel, 'No hay métricas recomendadas con la evidencia actual.')
     ])
   ]);
 
@@ -736,45 +761,20 @@ function renderPanel(snapshot) {
     ])
   ]);
 
-  const exportPanel = element('section', {
-    class: 'tabpanel',
-    id: 'contextic-tabpanel-exportar',
-    role: 'tabpanel',
-    'aria-labelledby': 'contextic-tab-exportar',
-    tabindex: '0',
-    hidden: ''
-  }, [
-    element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Exportar']),
-      element('div', { class: 'actions' }, [
-        copyButtons[0],
-        element('div', { class: 'secondary-actions' }, [copyButtons[1], copyButtons[2]]),
-        copyStatus
-      ])
-    ]),
-    element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Resumen para traspaso']),
-      element('div', { class: 'detail-card' }, [
-        element('p', {}, [handoffSummary(snapshot, summaryText)])
-      ])
-    ]),
-    element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Métricas recomendadas']),
-      tokenList(recommendedMetrics(snapshot), metricLabel, 'No hay métricas recomendadas con la evidencia actual.')
-    ])
-  ]);
-
   const tabButtons = [
     element('button', { class: 'tab', id: 'contextic-tab-diagnostico', type: 'button', role: 'tab', 'aria-selected': 'true', 'aria-controls': 'contextic-tabpanel-diagnostico', tabindex: '0' }, ['Diagnóstico']),
-    element('button', { class: 'tab', id: 'contextic-tab-sistema', type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-controls': 'contextic-tabpanel-sistema', tabindex: '-1' }, ['Sistema visual']),
-    element('button', { class: 'tab', id: 'contextic-tab-exportar', type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-controls': 'contextic-tabpanel-exportar', tabindex: '-1' }, ['Exportar'])
+    element('button', { class: 'tab', id: 'contextic-tab-sistema', type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-controls': 'contextic-tabpanel-sistema', tabindex: '-1' }, ['Sistema visual'])
   ];
-  const tabPanels = [diagnosticPanel, visualSystemPanel, exportPanel];
+  const tabPanels = [diagnosticPanel, visualSystemPanel];
   const body = element('div', { class: 'body' }, [
     element('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Secciones de Contextic' }, tabButtons),
     diagnosticPanel,
-    visualSystemPanel,
-    exportPanel
+    visualSystemPanel
+  ]);
+  const footer = element('footer', { class: 'panel-footer', 'aria-label': 'Acciones de exportación' }, [
+    copyButtons[0],
+    element('div', { class: 'secondary-actions' }, [copyButtons[1], copyButtons[2]]),
+    copyStatus
   ]);
 
   const panel = element('div', { class: 'panel', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'contextic-title' }, [
@@ -789,7 +789,8 @@ function renderPanel(snapshot) {
       ]),
       closeButton
     ]),
-    body
+    body,
+    footer
   ]);
 
   shadow.append(style, panel);

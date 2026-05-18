@@ -131,17 +131,19 @@ function buildColorContext(element, property) {
   const selector = readableSelector(element);
   const region = classifyElementRegion(element);
   const componentType = inferComponentType(element);
+  const stateContext = inferStateContext(element, { componentType });
   const isVisible = true;
   const isSystemOrHidden = region === 'hidden_or_system';
   const isUserFacing = isVisible && !isSystemOrHidden;
   const interactive = isInteractive(element);
   const appearsInCta = interactive && isMainAction(element);
-  const semanticContext = semanticRoleFromContext(element, { componentType, region });
+  const semanticContext = semanticRoleFromContext(element, { componentType, region, stateContext });
 
   return {
     property,
     selector,
     componentType,
+    stateContext,
     region,
     visible: isUserFacing,
     isVisible,
@@ -187,11 +189,30 @@ function inferComponentType(element) {
   if (tag === 'input' || tag === 'textarea' || tag === 'select') return 'form_field';
   if (tag === 'form') return 'form';
   if (tag === 'nav' || role === 'navigation') return 'navigation';
+  if (hasAncestor(element, ancestor => ancestor.tagName?.toLowerCase?.() === 'nav' || String(ancestor.getAttribute?.('role') || '').toLowerCase() === 'navigation')) return 'navigation_item';
   if (role === 'alert' || role === 'status' || /\b(alert|toast|banner|message)\b/.test(classAndId)) return 'alert';
+  if (/\b(circle|dot|blob|shape|decorative|decoration)\b/.test(classAndId)) return 'decorative';
   if (/\b(help|tip|tooltip|hint)\b/.test(classAndId)) return 'help';
   if (/\b(card)\b/.test(classAndId)) return 'card';
   if (/\b(logo|brand)\b/.test(classAndId)) return 'brand_asset';
   return 'static';
+}
+
+function inferStateContext(element, context = {}) {
+  const descriptor = elementDescriptor(element);
+  const role = String(element.getAttribute?.('role') || '').toLowerCase();
+  const ariaCurrent = String(element.getAttribute?.('aria-current') || '').toLowerCase();
+  const ariaSelected = String(element.getAttribute?.('aria-selected') || '').toLowerCase();
+  const ariaDisabled = String(element.getAttribute?.('aria-disabled') || '').toLowerCase();
+  const disabled = element.matches?.(':disabled, [aria-disabled="true"]') || ariaDisabled === 'true';
+  const isNav = context.componentType === 'navigation' || context.componentType === 'navigation_item' || role === 'navigation' || hasAncestor(element, ancestor => ancestor.tagName?.toLowerCase?.() === 'nav' || String(ancestor.getAttribute?.('role') || '').toLowerCase() === 'navigation');
+
+  if (disabled || /\b(disabled|is-disabled)\b/.test(descriptor)) return 'disabled';
+  if (ariaCurrent && ariaCurrent !== 'false') return isNav ? 'active_navigation' : 'current';
+  if (ariaSelected === 'true' || /\b(selected|is-selected)\b/.test(descriptor)) return 'selected';
+  if (isNav && /\b(active|current|is-active)\b/.test(descriptor)) return 'active_navigation';
+  if (/\b(focus|focused|focus-visible)\b/.test(descriptor)) return 'focus';
+  return 'none';
 }
 
 function isInteractive(element) {
@@ -208,23 +229,27 @@ function isMainAction(element) {
 
 function semanticRoleFromContext(element, context = {}) {
   if (context.region === 'hidden_or_system') return { role: 'none', reason: 'Hidden/system or utility context is not semantic state evidence.' };
+  if (['active_navigation', 'selected', 'current', 'focus', 'disabled'].includes(context.stateContext)) {
+    return { role: 'none', reason: 'UI state context is not semantic success/warning/error evidence.' };
+  }
 
   const descriptor = elementDescriptor(element);
   const role = String(element.getAttribute?.('role') || '').toLowerCase();
   const ariaInvalid = element.getAttribute?.('aria-invalid') === 'true';
   const evidence = descriptor;
   const isAlert = role === 'alert' || context.componentType === 'alert';
+  const isStatus = role === 'status';
   const hasValidationComponent = /\b(error|invalid|danger|destructive|field-error|validation|form-error)\b/.test(descriptor);
-  const hasWarningComponent = /\b(warning|caution|notice|alert)\b/.test(descriptor);
-  const hasSuccessComponent = /\b(success|valid|completed|complete|confirmation|confirmed)\b/.test(descriptor);
+  const hasWarningComponent = /\b(warning|caution|alert-warning|warning-alert|validation-warning)\b/.test(descriptor);
+  const hasSuccessComponent = /\b(success|valid|completed|complete|confirmation|confirmed|alert-success|success-alert)\b/.test(descriptor);
   const hasInfoComponent = /\b(alert-info|info-alert|help|tip|tooltip|hint|notice)\b/.test(descriptor) && context.componentType !== 'link';
 
   if (ariaInvalid) return { role: 'error', reason: 'aria-invalid="true" is strong error evidence.' };
   if (hasValidationComponent) return { role: 'error', reason: 'Class, id or data attribute contains error/invalid/danger validation evidence.' };
   if (isAlert && /\b(error|invalid|danger|destructive|validation)\b/.test(evidence)) return { role: 'error', reason: 'Alert component carries explicit error evidence.' };
 
-  if (hasSuccessComponent) return { role: 'success', reason: 'Class, id or data attribute contains success/valid/completed evidence.' };
-  if (role === 'status' && hasSuccessComponent) return { role: 'success', reason: 'role="status" contains explicit success evidence.' };
+  if (hasSuccessComponent && (isStatus || isAlert || /\b(status|alert|message|notification|toast|validation)\b/.test(descriptor))) return { role: 'success', reason: 'Semantic status/alert component contains success/valid/completed evidence.' };
+  if (isStatus && hasSuccessComponent) return { role: 'success', reason: 'role="status" contains explicit success evidence.' };
 
   if (hasWarningComponent) return { role: 'warning', reason: 'Class, id or data attribute contains warning/caution/notice evidence.' };
   if (isAlert && !/\b(error|danger|destructive|invalid)\b/.test(evidence)) return { role: 'warning', reason: 'Non-destructive alert component is warning evidence.' };
@@ -249,6 +274,15 @@ function elementAttributes(element) {
   if (!element?.attributes) return [];
   if (typeof element.attributes[Symbol.iterator] === 'function') return Array.from(element.attributes);
   return Object.entries(element.attributes).map(([name, value]) => ({ name, value }));
+}
+
+function hasAncestor(element, predicate) {
+  let current = element.parentElement;
+  while (current) {
+    if (predicate(current)) return true;
+    current = current.parentElement;
+  }
+  return false;
 }
 
 function collectCssVariables() {
@@ -375,6 +409,9 @@ function baseRoleFromCssProperty(hex, count, contexts, variableHints, metrics) {
   const properties = contexts.map(context => context.property);
   const hasProperty = matcher => properties.some(property => matcher(normalizeCssProperty(property)));
 
+  if (hasProperty(property => property === 'backgroundcolor') && (luminance > 0.92 || isNeutralHex(hex))) {
+    return role('surface', 'medium', 'BackgroundColor neutro/claro mapea a superficie.', 'base_css_property');
+  }
   if (hasProperty(property => property === 'color')) {
     const confidence = count > 1 ? 'high' : 'medium';
     return role('text', confidence, 'Propiedad CSS color mapea a texto; sin evidencia semántica fuerte localizada.', 'base_css_property');
@@ -440,6 +477,7 @@ function canSemanticStateOverrideBaseColor(hex, context, metrics = {}) {
   if (property === 'boxshadow' || property === 'textshadow') return false;
   if (context.semanticContext === 'warning' && property === 'color' && !hasExplicitSemanticToken) return false;
   if (property === 'color' && isNeutralHex(hex) && !hasExplicitSemanticToken) return false;
+  if (['active_navigation', 'selected', 'current', 'focus', 'disabled'].includes(context.stateContext)) return false;
   if (property === 'backgroundcolor' || property.includes('border') || property === 'outlinecolor') return true;
   return Number(metrics.saturation || 0) >= 0.28 && Number(metrics.luminance || 0) < 0.92;
 }

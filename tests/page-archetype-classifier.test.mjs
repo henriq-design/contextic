@@ -81,6 +81,23 @@ test('classifies an education home portal without treating accessibility widget 
   assert.ok(['medium', 'low'].includes(classification.confidence));
 });
 
+test('classifies private dashboard as app usability review', () => {
+  const classification = pageArchetypeClassifier({
+    url: 'https://privatearea.grupoanaya.es/anaya/dashboard',
+    title: 'Área privada Anaya - Dashboard',
+    headings: ['Panel de control', 'Mis recursos', 'Actividad reciente'],
+    visibleText: 'Dashboard workspace panel de control usuario autenticado menú lateral configuración informes proyectos recursos asignados',
+    components: {
+      counts: { buttons: 4, cards: 104, badges: 11, inputs: 1, forms: 1, navigation: 1, ctaGroups: 1 },
+      samples: { buttons: [{ text: 'Crear recurso' }], ctaGroups: [{ actions: ['Crear recurso', 'Filtrar'] }] }
+    }
+  });
+
+  assert.equal(classification.archetype, 'dashboard_or_app');
+  assert.equal(classification.analysisMode, 'app_usability_review');
+  assert.equal(classification.reviewModel, 'dashboard_app');
+});
+
 test('keeps weak evidence as unknown snapshot only', () => {
   const classification = pageArchetypeClassifier({
     url: 'https://example.com/random',

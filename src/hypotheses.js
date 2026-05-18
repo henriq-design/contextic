@@ -1,4 +1,5 @@
 export function generateHypotheses(findings = [], pageClassification = {}, context = {}) {
+  if (isDashboardAppReview(pageClassification)) return [];
   if (isPortalArchetype(pageClassification)) return [];
   const behavioralHypotheses = hypothesesFromBehavioralMapping(context.behavioralMapping || [], pageClassification);
   const rankedFindings = findings
@@ -33,17 +34,25 @@ export function generateReviewTasks(findings = [], pageClassification = {}, cont
   if (isPortalArchetype(pageClassification)) {
     tasks.push(...portalReviewTasks(pageClassification, context));
   }
+  if (isDashboardAppReview(pageClassification)) {
+    tasks.push(...dashboardAppReviewTasks(context));
+  }
 
   return dedupeTasks(tasks).sort(compareReviewTasks).slice(0, 6).map((task, index) => ({ id: `R${index + 1}`, ...task }));
 }
 
 function shouldCreateHypothesis(finding, pageClassification = {}) {
   if (!finding) return false;
+  if (isDashboardAppReview(pageClassification)) return false;
   if (isPortalArchetype(pageClassification)) return false;
   if (finding.type === 'manual_review' && finding.confidence === 'low') return hasActionableExperimentInputs(finding);
   if (finding.confidence === 'low' && finding.priority === 'Review') return hasActionableExperimentInputs(finding);
   if (finding.type === 'design_system_debt') return pageClassification.analysisMode === 'design_system_audit' && hasConcreteEvidence(finding) && hasPrimaryMetric(finding);
   return hasConcreteEvidence(finding) && hasPrimaryMetric(finding) && (['medium', 'high'].includes(finding.confidence) || finding.impact === 'high');
+}
+
+function isDashboardAppReview(pageClassification = {}) {
+  return pageClassification.archetype === 'dashboard_or_app' || pageClassification.analysisMode === 'app_usability_review' || pageClassification.reviewModel === 'dashboard_app';
 }
 
 function isPortalArchetype(pageClassification = {}) {
@@ -82,6 +91,64 @@ function portalReviewTasks(pageClassification = {}, context = {}) {
       whyItMatters: 'Una home/portal necesita priorizar rutas por tarea o audiencia, no optimizar cada enlace como conversión.',
       howToValidate: 'Mapear acciones visibles contra tareas principales y revisar si buscador/catálogo tienen peso suficiente.',
       owner: 'design'
+    });
+  }
+
+  return tasks;
+}
+
+function dashboardAppReviewTasks(context = {}) {
+  const components = context.components || {};
+  const counts = components.counts || {};
+  const tasks = [];
+
+  if (Number(counts.cards || 0) > 20) {
+    tasks.push({
+      question: 'Validar densidad, agrupación, jerarquía y estados de las cards del dashboard.',
+      evidence: [`${counts.cards} card(s) detectadas en el inventario principal.`],
+      whyItMatters: 'Un dashboard con muchas cards puede perder escaneabilidad si no hay agrupación, jerarquía visual, estados vacíos/cargando y prioridades claras.',
+      howToValidate: 'Revisar agrupación por tarea, títulos, densidad, estados empty/loading/error y comportamiento responsive.',
+      owner: 'design/product'
+    });
+  }
+
+  if (Number(counts.badges || 0) > 0) {
+    tasks.push({
+      question: 'Validar significado, contraste, consistencia y accesibilidad de badges/status.',
+      evidence: [`${counts.badges} badge(s) detectados.`],
+      whyItMatters: 'Los badges en apps suelen comunicar estado; si el color es el único canal, el significado puede perderse.',
+      howToValidate: 'Comprobar contraste, texto/icono alternativo, nombres accesibles y mapa de estados documentado.',
+      owner: 'design-system'
+    });
+  }
+
+  if (Number(counts.inputs || 0) > 0 || Number(counts.forms || 0) > 0) {
+    tasks.push({
+      question: 'Validar labels, help text, error state, disabled/loading y submit del formulario.',
+      evidence: [`${counts.inputs || 0} campo(s) y ${counts.forms || 0} formulario(s) detectados.`],
+      whyItMatters: 'En herramientas internas, un formulario ambiguo puede bloquear la tarea aunque no sea una fricción de conversión.',
+      howToValidate: 'Revisar nombres accesibles, texto de ayuda, errores, foco, submit, estado disabled/loading y recuperación.',
+      owner: 'dev/design'
+    });
+  }
+
+  if (Number(counts.navigation || 0) > 0) {
+    tasks.push({
+      question: 'Validar estado actual, foco, orden de teclado y claridad de rutas de navegación.',
+      evidence: [`${counts.navigation} landmark(s) de navegación detectados.`],
+      whyItMatters: 'La orientación en dashboards depende de saber dónde estás, qué rutas existen y cómo moverte con teclado.',
+      howToValidate: 'Comprobar aria-current/estado activo, foco visible, orden de tabulación, landmarks y labels de rutas.',
+      owner: 'dev/design'
+    });
+  }
+
+  if (Number(counts.ctaGroups || 0) > 0) {
+    tasks.push({
+      question: 'Validar jerarquía primaria/secundaria y acción esperada del grupo CTA.',
+      evidence: [`${counts.ctaGroups} grupo(s) CTA detectados.`],
+      whyItMatters: 'En dashboards, las acciones deben distinguir creación, navegación, filtros o tareas destructivas sin sesgo de conversión.',
+      howToValidate: 'Mapear cada acción a la tarea esperada, confirmar jerarquía visual, estados y etiquetas de botones.',
+      owner: 'design/product'
     });
   }
 

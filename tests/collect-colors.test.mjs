@@ -393,6 +393,61 @@ test('yellow CTA background uses CTA context as observed sample', () => {
   assert.match(yellow.roleReason, /CTA|acción principal/i);
 });
 
+test('active navigation border is not classified as success', () => {
+  const root = tree('body', {}, [
+    tree('nav', {}, [
+      tree('li', {
+        text: 'Dashboard',
+        className: 'active nav-item',
+        style: { borderBottomColor: '#dee2e6' }
+      })
+    ])
+  ]);
+
+  const grey = collectColors(root).colors.find(color => color.value === '#dee2e6');
+
+  assert.ok(grey);
+  assert.equal(grey.sample.context.stateContext, 'active_navigation');
+  assert.notEqual(grey.suggestedRole, 'success');
+  assert.ok(['border', 'accent', 'unknown'].includes(grey.suggestedRole));
+});
+
+test('decorative yellow circle is accent, not warning', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('div', {
+        className: 'circle circle-bottom',
+        style: { backgroundColor: '#ffc602' }
+      })
+    ])
+  ]);
+
+  const yellow = collectColors(root).colors.find(color => color.value === '#ffc602');
+
+  assert.ok(yellow);
+  assert.equal(yellow.sample.context.componentType, 'decorative');
+  assert.notEqual(yellow.suggestedRole, 'warning');
+  assert.equal(yellow.suggestedRole, 'accent');
+});
+
+test('white with background sample does not use text role reason', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('section', {
+        className: 'surface',
+        style: { backgroundColor: '#ffffff', color: '#ffffff' }
+      })
+    ])
+  ]);
+
+  const white = collectColors(root).colors.find(color => color.value === '#ffffff');
+
+  assert.ok(white);
+  assert.equal(white.sample.property, 'backgroundColor');
+  assert.notEqual(white.suggestedRole, 'text');
+  assert.doesNotMatch(white.roleReason, /color mapea a texto/i);
+});
+
 test('grey borderTopColor is classified as border', () => {
   const root = tree('body', {}, [
     tree('main', {}, [

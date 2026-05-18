@@ -142,7 +142,8 @@ test('interface source uses Spanish behavioral labels instead of visible English
   assert.match(source, /Bloques débiles/);
   assert.match(source, /Fricciones UX/);
   assert.match(source, /Sistema visual/);
-  assert.match(source, /Exportar/);
+  assert.match(source, /panel-footer/);
+  assert.doesNotMatch(source, /contextic-tab-exportar/);
   assert.match(source, /role: 'tablist'/);
   assert.match(source, /role: 'tab'/);
   assert.match(source, /role: 'tabpanel'/);

@@ -18,9 +18,12 @@ const CRITICAL_BLOCKER_RULES = new Set([
 export function buildFindings(snapshot = {}) {
   const frictions = snapshot.frictions || [];
   const behavioralMapping = snapshot.behavioralMapping || [];
+  const components = snapshot.components || {};
+  const pageClassification = snapshot.pageClassification || {};
   const findings = [
     ...frictions.map(frictionToFinding),
-    ...weakBlocksToReviewFindings(behavioralMapping)
+    ...weakBlocksToReviewFindings(behavioralMapping),
+    ...componentAccessibilityReviewFindings(components, pageClassification)
   ];
 
   return findings.sort(compareFindings);
@@ -79,6 +82,67 @@ function weakBlocksToReviewFindings(behavioralMapping = []) {
       priority: 'Review',
       rationale: block.missing?.[0] || 'Bloque behavioral débil sin fricción heurística fuerte; se mantiene como revisión manual, no como bloqueo crítico.'
     }));
+}
+
+function componentAccessibilityReviewFindings(components = {}, pageClassification = {}) {
+  const counts = components.counts || {};
+  const samples = components.samples || {};
+  const isAppReview = pageClassification.analysisMode === 'app_usability_review' || pageClassification.reviewModel === 'dashboard_app';
+  if (!isAppReview) return [];
+
+  const findings = [];
+  if (Number(counts.inputs || 0) > 0) {
+    findings.push(createFinding({
+      id: 'accessibility.form-fields-review',
+      type: 'accessibility_risk',
+      title: 'Revisar accesibilidad de campos de formulario',
+      evidence: [
+        `${counts.inputs} campo(s) de formulario detectados.`,
+        ...(samples.unlabeledInputs || []).map(item => `Campo sin label claro: ${item}`)
+      ],
+      affectedArea: 'form fields',
+      severity: (samples.unlabeledInputs || []).length ? 3 : 2,
+      confidence: (samples.unlabeledInputs || []).length ? 'medium' : 'low',
+      impact: 'medium',
+      effort: 'medium',
+      priority: 'Review',
+      rationale: 'Los campos en dashboards necesitan label, ayuda, error, disabled/loading y submit verificables antes de marcar la pantalla como limpia.'
+    }));
+  }
+
+  if (Number(counts.badges || 0) > 0) {
+    findings.push(createFinding({
+      id: 'accessibility.badges-status-review',
+      type: 'accessibility_risk',
+      title: 'Revisar badges y estados visuales',
+      evidence: [`${counts.badges} badge(s) o labels de estado detectados.`],
+      affectedArea: 'badges/status',
+      severity: 2,
+      confidence: 'low',
+      impact: 'medium',
+      effort: 'medium',
+      priority: 'Review',
+      rationale: 'Los badges suelen codificar estado o categoría; conviene validar significado, contraste, nombre accesible y consistencia.'
+    }));
+  }
+
+  if (Number(counts.forms || 0) > 0) {
+    findings.push(createFinding({
+      id: 'accessibility.forms-review',
+      type: 'accessibility_risk',
+      title: 'Revisar estados accesibles de formulario',
+      evidence: [`${counts.forms} formulario(s) detectados.`],
+      affectedArea: 'forms',
+      severity: 2,
+      confidence: 'low',
+      impact: 'medium',
+      effort: 'medium',
+      priority: 'Review',
+      rationale: 'El formulario requiere revisión de submit, errores, ayuda contextual, estado disabled/loading y navegación por teclado.'
+    }));
+  }
+
+  return findings;
 }
 
 function createFinding(input = {}) {

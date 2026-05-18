@@ -80,6 +80,43 @@ test('report and JSON export are serializable', () => {
   assert.equal(JSON.parse(json).meta.toolName, 'Contextic');
 });
 
+test('dashboard app report includes component accessibility review findings', () => {
+  const report = buildContexticReport(createSnapshot({
+    pageClassification: {
+      archetype: 'dashboard_or_app',
+      confidence: 'medium',
+      signals: ['Señales fuertes de dashboard.'],
+      analysisMode: 'app_usability_review',
+      reviewModel: 'dashboard_app'
+    },
+    components: {
+      counts: {
+        buttons: 0,
+        links: 0,
+        inputs: 1,
+        forms: 1,
+        cards: 104,
+        badges: 11,
+        navigation: 1,
+        ctaGroups: 1
+      },
+      samples: {
+        buttons: [],
+        unlabeledInputs: ['input#search'],
+        ctaGroups: [{ actions: ['Crear', 'Filtrar'] }]
+      }
+    },
+    behavioralMapping: [],
+    frictions: []
+  }));
+
+  assert.equal(report.pageClassification.analysisMode, 'app_usability_review');
+  assert.equal(report.hypotheses.length, 0);
+  assert.ok(report.findings.some(finding => finding.type === 'accessibility_risk' && finding.priority === 'Review'));
+  assert.ok(report.reviewTasks.some(task => /densidad, agrupación, jerarquía y estados/.test(task.question)));
+  assert.equal(report.detectedComponents.find(component => component.name === 'Form field').accessibilityRisk, 'needs_review');
+});
+
 function createSnapshot(overrides = {}) {
   const base = {
     meta: {

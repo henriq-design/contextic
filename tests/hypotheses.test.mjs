@@ -112,6 +112,62 @@ test('education portal creates lightweight review tasks without A/B hypotheses',
   assert.ok(reviewTasks.some(task => /jerarquía de acciones/.test(task.question)));
 });
 
+test('dashboard app creates inventory review tasks without conversion hypotheses', () => {
+  const dashboard = {
+    archetype: 'dashboard_or_app',
+    confidence: 'medium',
+    analysisMode: 'app_usability_review',
+    reviewModel: 'dashboard_app',
+    signals: ['Señales fuertes de dashboard, workspace, panel, ajustes o aplicación autenticada.']
+  };
+  const components = {
+    counts: {
+      cards: 104,
+      badges: 11,
+      inputs: 1,
+      forms: 1,
+      navigation: 1,
+      ctaGroups: 1
+    }
+  };
+
+  const hypotheses = generateHypotheses([], dashboard, { components });
+  const reviewTasks = generateReviewTasks([], dashboard, { components });
+
+  assert.deepEqual(hypotheses, []);
+  assert.ok(reviewTasks.some(task => /densidad, agrupación, jerarquía y estados/.test(task.question)));
+  assert.ok(reviewTasks.some(task => /badges\/status/.test(task.question)));
+  assert.ok(reviewTasks.some(task => /labels, help text, error state/.test(task.question)));
+  assert.ok(reviewTasks.some(task => /estado actual, foco, orden de teclado/.test(task.question)));
+  assert.ok(reviewTasks.some(task => /jerarquía primaria\/secundaria/.test(task.question)));
+});
+
+test('dashboard component accessibility risks become low confidence review findings', () => {
+  const dashboard = {
+    archetype: 'dashboard_or_app',
+    confidence: 'medium',
+    analysisMode: 'app_usability_review',
+    reviewModel: 'dashboard_app'
+  };
+  const reviewTasks = generateReviewTasks([
+    {
+      id: 'accessibility.badges-status-review',
+      type: 'accessibility_risk',
+      title: 'Revisar badges y estados visuales',
+      evidence: ['11 badge(s) o labels de estado detectados.'],
+      affectedArea: 'badges/status',
+      severity: 2,
+      confidence: 'low',
+      impact: 'medium',
+      effort: 'medium',
+      priority: 'Review',
+      rationale: 'Los badges suelen codificar estado o categoría.'
+    }
+  ], dashboard, { components: { counts: { badges: 11 } } });
+
+  assert.ok(reviewTasks.some(task => /badges|estado/i.test(task.question)));
+});
+
 test('no high-confidence finding does not create baseline review task', () => {
   const hypotheses = generateHypotheses([], landing);
   const reviewTasks = generateReviewTasks([], landing);

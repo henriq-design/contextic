@@ -92,7 +92,9 @@ ${buildBehavioralAssessment({ fullBehavioral, behavioralMapping, pageClassificat
 
 ## Hallazgos UX
 
-${fullBehavioral
+${pageClassification.analysisMode === 'app_usability_review'
+  ? '- No se detectan fricciones UX de alta confianza. Hay revisiones de usabilidad de app recomendadas en tareas de revisión.'
+  : fullBehavioral
   ? buildFindingList(findingGroups.ux.filter(finding => finding.confidence !== 'low' && finding.priority !== 'Review'))
   : '- Análisis behavioral limitado o desactivado por clasificación de página. No se generan recomendaciones de conversión con la matriz actual para este arquetipo.'}
 
@@ -102,7 +104,7 @@ ${buildFindingList(findingGroups.designSystem)}
 
 ## Hallazgos de accesibilidad
 
-${buildFindingList(findingGroups.accessibility)}
+${buildAccessibilityFindingList(findingGroups.accessibility, report.detectedComponents)}
 
 ## Hallazgos de baja confianza
 
@@ -293,12 +295,13 @@ function buildDesignSystemTokenRows(spacing = {}) {
 }
 
 function buildCssVariableList(cssVariables = []) {
-  if (!cssVariables.length) return '- No se detectaron variables CSS en los estilos computados de root.';
+  const primaryVariables = cssVariables.filter(variable => !variable.systemUtility);
+  if (!primaryVariables.length) return '- No se detectaron variables CSS propias en los estilos computados de root.';
 
   return [
     '| Variable | Valor | Uso |',
     '|---|---|---|',
-    ...cssVariables.slice(0, 16).map(variable => `| ${escapePipes(variable.name)} | ${escapePipes(variable.value)} | ${escapePipes(translateUsageStatus(variable.usageStatus || 'unknown usage'))} |`)
+    ...primaryVariables.slice(0, 16).map(variable => `| ${escapePipes(variable.name)} | ${escapePipes(variable.value)} | ${escapePipes(translateUsageStatus(variable.usageStatus || 'unknown usage'))} |`)
   ].join('\n');
 }
 
@@ -307,10 +310,14 @@ function buildSystemHiddenVisualNoise({ colors = {}, typography = {}, components
   const noisyColors = colors.systemHiddenVisualNoise || [];
   const noisyType = typography.systemHiddenVisualNoise || [];
   const noisyComponents = Object.entries(components.systemHiddenComponents || {}).filter(([, value]) => count(value) > 0);
+  const systemVariables = (colors.cssVariables || []).filter(variable => variable.systemUtility);
+  const widgets = components.systemUtilityWidgets || [];
 
   if (noisyColors.length) lines.push(`- Colores usados sobre todo en contextos de sistema/ocultos: ${noisyColors.slice(0, 5).map(item => `${item.value} (${item.count})`).join(', ')}.`);
   if (noisyType.length) lines.push(`- Estilos tipográficos usados sobre todo en contextos de sistema/ocultos: ${noisyType.slice(0, 3).map(item => `${item.value} (${item.count})`).join(', ')}.`);
   if (noisyComponents.length) lines.push(`- Componentes excluidos del inventario principal: ${noisyComponents.map(([name, value]) => `${name} ${value}`).join(', ')}.`);
+  if (systemVariables.length) lines.push(`- Variables de widget/utilidad externa: ${systemVariables.slice(0, 8).map(variable => `${variable.name}=${variable.value}`).join(', ')}.`);
+  if (widgets.length) lines.push(`- Widgets/utilidades externas detectadas: ${widgets.map(widget => `${widget.type} (${widget.selector})`).join(', ')}.`);
 
   return lines.join('\n') || '- Ningún ruido visual de sistema/oculto domina el snapshot visible.';
 }
@@ -409,6 +416,9 @@ function behavioralScopeNote(pageClassification = {}) {
   if (pageClassification.analysisMode === 'full_behavioral') {
     return 'La matriz behavioral completa se aplica porque la página parece una landing o service landing con confianza suficiente.';
   }
+  if (pageClassification.analysisMode === 'app_usability_review') {
+    return 'La matriz behavioral de conversión queda desactivada; se activa revisión ligera de usabilidad para dashboard/app basada en inventario y estados.';
+  }
   if (pageClassification.analysisMode === 'limited_behavioral') {
     return 'La matriz behavioral de conversión queda desactivada; se entrega snapshot, inventario, riesgos de accesibilidad y notas de revisión manual.';
   }
@@ -443,7 +453,9 @@ function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses =
     `- Inferido: arquetipo ${pageClassification.archetype || 'unknown'} con confianza ${pageClassification.confidence || 'low'}.`,
     highConfidenceRisks.length
       ? `- Riesgos UX de alta confianza: ${highConfidenceRisks.map(finding => finding.title).slice(0, 3).join('; ')}.`
-      : '- No se detectan fricciones UX de alta confianza.',
+      : pageClassification.analysisMode === 'app_usability_review'
+        ? '- No se detectan fricciones UX de alta confianza; se recomiendan revisiones de app por inventario/estados.'
+        : '- No se detectan fricciones UX de alta confianza.',
     `- Bloques débiles: ${blockCategories.bloques_debiles.length}${blockCategories.bloques_debiles.length ? ` (${blockCategories.bloques_debiles.map(block => blockLabel(block)).join(', ')})` : ''}.`,
     `- Señales de revisión ligera: ${blockCategories.señales_revision_ligera.length ? blockCategories.señales_revision_ligera.map(block => block.displayLabel || behavioralBlockDisplayLabel(block.block)).join(', ') : '0'}.`,
     topProductHypothesis
@@ -461,6 +473,11 @@ function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses =
 
 function buildBehavioralAssessment({ fullBehavioral, behavioralMapping = [], pageClassification = {} }) {
   if (!fullBehavioral) {
+    if (pageClassification.analysisMode === 'app_usability_review') {
+      return `- Modo de análisis: app_usability_review.
+- No se generan recomendaciones de conversión para dashboards/apps.
+- La revisión se centra en densidad, navegación, estados, formularios, badges, accesibilidad y claridad de tarea.`;
+    }
     return `- Modo de análisis behavioral: ${pageClassification.analysisMode || 'snapshot_only'}.
 - No se generan recomendaciones de conversión para este arquetipo con el modelo behavioral actual.
 - Tratar cualquier nota behavioral como revisión manual, no como instrucción de optimización.`;
@@ -517,6 +534,15 @@ function confidenceNote(confidence = 'low', fallback = '') {
 function buildFindingList(findings = []) {
   if (!findings.length) return '- No se detectan hallazgos en esta categoría.';
   return findings.map(formatFinding).join('\n\n');
+}
+
+function buildAccessibilityFindingList(findings = [], detectedComponents = []) {
+  if (findings.length) return buildFindingList(findings);
+  const reviewComponents = detectedComponents.filter(component => component.accessibilityRisk === 'needs_review');
+  if (reviewComponents.length) {
+    return `- No se detectan problemas de accesibilidad de alta confianza. Hay revisiones recomendadas: ${reviewComponents.map(component => `${component.name} (${component.count})`).join(', ')}.`;
+  }
+  return '- No se detectan problemas de accesibilidad de alta confianza.';
 }
 
 function formatFinding(finding) {
@@ -775,6 +801,9 @@ function translateUsageStatus(status = '') {
   return String(status)
     .replace('unknown usage', 'uso desconocido')
     .replace('visible usage', 'uso visible')
+    .replace('used visible', 'uso visible')
+    .replace('declared only', 'solo declarada')
+    .replace('third-party/accessibility-widget usage', 'uso de widget externo/accesibilidad')
     .replace('hidden/system usage', 'uso oculto/sistema');
 }
 

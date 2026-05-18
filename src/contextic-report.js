@@ -132,20 +132,25 @@ function getMainConversionRisk(frictions, behavioralMapping) {
 function buildDetectedComponents(components) {
   const counts = components.counts || {};
   return [
-    ['Button', counts.buttons],
-    ['Link', counts.links],
-    ['Form field', counts.inputs],
-    ['Form', counts.forms],
-    ['Card', counts.cards],
-    ['Alert / live region', counts.alerts],
-    ['Navigation', counts.navigation],
-    ['Modal / dialog', counts.dialogs],
-    ['Badge', counts.badges],
-    ['CTA group', counts.ctaGroups],
-    ['Image', counts.images]
+    ['Button', counts.buttons, count(counts.buttons) ? 'verify_focus_visible' : 'unknown'],
+    ['Link', counts.links, count(counts.links) ? 'verify_focus_visible' : 'unknown'],
+    ['Form field', counts.inputs, count(counts.inputs) ? 'needs_review' : 'unknown'],
+    ['Form', counts.forms, count(counts.forms) ? 'needs_review' : 'unknown'],
+    ['Card', counts.cards, 'unknown'],
+    ['Alert / live region', counts.alerts, count(counts.alerts) ? 'needs_review' : 'unknown'],
+    ['Navigation', counts.navigation, count(counts.navigation) ? 'needs_review' : 'unknown'],
+    ['Modal / dialog', counts.dialogs, count(counts.dialogs) ? 'needs_review' : 'unknown'],
+    ['Badge', counts.badges, count(counts.badges) ? 'needs_review' : 'unknown'],
+    ['CTA group', counts.ctaGroups, count(counts.ctaGroups) ? 'needs_review' : 'unknown'],
+    ['Image', counts.images, 'unknown']
   ]
     .filter(([, count]) => Number(count) > 0)
-    .map(([name, count]) => ({ name, count, evidenceType: 'structural' }));
+    .map(([name, count, accessibilityRisk]) => ({ name, count, evidenceType: 'structural', accessibilityRisk }));
+}
+
+function count(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function normalizeBehavioralMapping(behavioralMapping) {

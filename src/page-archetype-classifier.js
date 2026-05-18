@@ -33,7 +33,8 @@ export function pageArchetypeClassifier(input = {}, root = input.root) {
     archetype: ARCHETYPES.has(archetype) ? archetype : 'unknown',
     confidence,
     signals: outputSignals.slice(0, 8),
-    analysisMode: analysisModeFor(archetype, confidence)
+    analysisMode: analysisModeFor(archetype, confidence),
+    reviewModel: reviewModelFor(archetype)
   };
 }
 
@@ -247,8 +248,15 @@ function confidenceFromScore(score, signalCount) {
 
 function analysisModeFor(archetype, confidence) {
   if (FULL_BEHAVIORAL_ARCHETYPES.has(archetype) && confidence !== 'low') return 'full_behavioral';
+  if (archetype === 'dashboard_or_app') return 'app_usability_review';
   if (archetype === 'unknown') return 'snapshot_only';
   return 'limited_behavioral';
+}
+
+function reviewModelFor(archetype) {
+  if (archetype === 'dashboard_or_app') return 'dashboard_app';
+  if (['home_or_portal', 'education_portal', 'content_portal', 'corporate_home', 'marketing_home'].includes(archetype)) return 'home_portal';
+  return 'default';
 }
 
 function readHeadings(root) {
