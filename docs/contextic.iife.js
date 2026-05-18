@@ -4945,7 +4945,40 @@ function renderPanel(snapshot) {
       }
       .body {
         overflow: auto;
+        padding: 0;
+      }
+      .tabs {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 4px;
+        padding: 10px;
+        border-bottom: 1px solid #d7ded8;
+        background: #ffffff;
+      }
+      .tab {
+        min-height: 40px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        background: transparent;
+        color: #5f6761;
+        cursor: pointer;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 850;
+        line-height: 16px;
+      }
+      .tab[aria-selected="true"] {
+        border-color: #b8c7bd;
+        background: #151515;
+        color: #ffffff;
+        box-shadow: 0 8px 20px rgba(22, 34, 28, 0.14);
+      }
+      .tabpanel {
+        display: none;
         padding: 14px;
+      }
+      .tabpanel.is-active {
+        display: block;
       }
       .hero-summary {
         display: grid;
@@ -5090,6 +5123,7 @@ function renderPanel(snapshot) {
         white-space: nowrap;
       }
       .component-line,
+      .detail-card,
       .mapping-row {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -5103,6 +5137,55 @@ function renderPanel(snapshot) {
         color: #151515;
         font-size: 12px;
         line-height: 17px;
+      }
+      .detail-card {
+        display: block;
+      }
+      .detail-card strong {
+        display: block;
+        margin-bottom: 4px;
+        color: #151515;
+        font-size: 12px;
+        line-height: 17px;
+      }
+      .detail-card p,
+      .detail-card ul {
+        margin: 0;
+        color: #5f6761;
+        font-size: 12px;
+        line-height: 18px;
+      }
+      .detail-card ul {
+        padding-left: 18px;
+      }
+      .detail-card li + li {
+        margin-top: 4px;
+      }
+      .detail-grid {
+        display: grid;
+        gap: 7px;
+      }
+      .token-list {
+        display: grid;
+        gap: 7px;
+      }
+      .token-line {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        border: 1px solid #d7ded8;
+        border-radius: 8px;
+        padding: 9px 10px;
+        background: #ffffff;
+        color: #151515;
+        font-size: 12px;
+        line-height: 17px;
+      }
+      .token-line span:first-child {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .mapping-list {
         display: grid;
@@ -5181,9 +5264,7 @@ function renderPanel(snapshot) {
       .actions {
         display: grid;
         gap: 8px;
-        padding: 12px 14px 14px;
-        border-top: 1px solid #d7ded8;
-        background: #ffffff;
+        margin-top: 12px;
       }
       .secondary-actions {
         display: grid;
@@ -5255,7 +5336,7 @@ function renderPanel(snapshot) {
       ? 'No se detectan fricciones UX de alta confianza. Hay bloques que conviene revisar.'
       : classification.analysisMode === 'full_behavioral'
         ? 'No se detectan fricciones UX de alta confianza.'
-        : 'Análisis behavioral limitado por arquetipo de página.';
+        : 'Análisis conductual limitado por arquetipo de página.';
   const componentSummary = `Botones ${snapshot.components.counts.buttons} · Inputs ${snapshot.components.counts.inputs} · Enlaces ${snapshot.components.counts.links} · Tarjetas ${snapshot.components.counts.cards}`;
 
   const heroSummary = element('div', { class: 'hero-summary' }, [
@@ -5275,7 +5356,7 @@ function renderPanel(snapshot) {
     metric('Fricciones UX', uxFrictionCount),
     metric('Bloques débiles', weakBlocksCount),
     metric('Revisión ligera', lightReviewCount),
-    metric('Riesgos DS', dsRiskCount),
+    metric('Riesgos sistema', dsRiskCount),
     metric('Revisión manual', manualReviewCount)
   ]);
 
@@ -5285,7 +5366,7 @@ function renderPanel(snapshot) {
       element('span', { class: 'swatch-chip', style: { background: color.value } }),
       element('span', {}, [
         element('span', { class: 'swatch-code' }, [color.value]),
-        element('span', { class: 'swatch-role', title: color.roleReason || '' }, [`${displayColorRole(color)} · ${color.count}`])
+        element('span', { class: 'swatch-role', title: color.roleReason || '' }, [`${colorRoleLabel(displayColorRole(color))} · ${color.count}`])
       ])
     ]));
   }
@@ -5302,75 +5383,163 @@ function renderPanel(snapshot) {
         element('span', { class: 'pill' }, [confidenceLabel(block.confidence || blockConfidence(block))])
       ])
     ]),
-    element('span', { class: 'pill' }, [block.title || 'bloque'])
+        element('span', { class: 'pill' }, [behavioralBlockTypeLabel(block.title)])
   ]));
 
-  const topFindingNodes = topFindingsByType(findingGroups, findings).map(item => element('div', { class: `friction ${severityClass(item.finding.severity)}` }, [
-    element('strong', {}, [
-      element('span', {}, [
-        element('span', { class: 'finding-type' }, [item.type]),
-        ' ',
-        item.finding.title
-      ]),
-      element('span', { class: 'pill' }, [item.finding.priority])
-    ]),
-    element('p', {}, [`${confidenceLabel(item.finding.confidence)} · ${item.finding.rationale}`])
-  ]));
+  const copyButtons = [
+    element('button', { class: 'copy primary', type: 'button', 'data-copy': 'design' }, ['Copiar design-context.md']),
+    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'json' }, ['Copiar JSON']),
+    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'issue' }, ['Copiar issue de GitHub'])
+  ];
 
-  const body = element('div', { class: 'body' }, [
+  const copyStatus = element('p', { class: 'notice', 'data-copy-status': '' }, [
+    'Salida heurística. Úsala como apoyo de revisión de producto/diseño, no como verdad absoluta.'
+  ]);
+
+  const topReviewTask = snapshot.reviewTasks[0];
+  const diagnosticPanel = element('section', {
+    class: 'tabpanel is-active',
+    id: 'contextic-tabpanel-diagnostico',
+    role: 'tabpanel',
+    'aria-labelledby': 'contextic-tab-diagnostico',
+    tabindex: '0'
+  }, [
     heroSummary,
     grid,
     element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Clasificación']),
+      element('div', { class: 'component-line' }, [
+        element('span', {}, [`${classificationLabel(classification.archetype)} · ${confidenceLabel(classification.confidence)}`]),
+        element('span', { class: 'pill' }, [analysisModeLabel(classification.analysisMode)])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, [classification.analysisMode === 'full_behavioral' ? 'Mapa conductual' : 'Revisión manual']),
+      ...(classification.analysisMode === 'full_behavioral'
+        ? (mappingRows.length ? [element('div', { class: 'mapping-list' }, mappingRows)] : [element('p', { class: 'notice' }, ['No hay mapa conductual disponible.'])])
+        : [element('p', { class: 'notice' }, ['No se generan recomendaciones de conversión con la matriz conductual actual para este arquetipo.'])])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Tarea principal de revisión']),
+      topReviewTask ? element('div', { class: 'detail-card' }, [
+        element('strong', {}, [topReviewTask.question || 'Revisar evidencia principal']),
+        element('p', {}, [topReviewTask.howToValidate || 'Validar con revisión manual y datos reales.'])
+      ]) : element('p', { class: 'notice' }, ['No hay tareas de revisión prioritarias con la evidencia actual.'])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Fricciones UX']),
+      ...(findingGroups.ux.length ? [element('div', { class: 'top-findings' }, findingCards(findingGroups.ux.slice(0, 4), 'UX'))] : [
+        element('p', { class: 'notice' }, ['No hay fricciones UX de alta confianza en esta captura.'])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Hipótesis']),
+      ...(snapshot.hypotheses.length ? [element('div', { class: 'detail-grid' }, hypothesisCards(snapshot.hypotheses.slice(0, 3)))] : [
+        element('p', { class: 'notice' }, ['No hay hipótesis accionables con la evidencia actual.'])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Tareas de revisión']),
+      ...(snapshot.reviewTasks.length ? [element('div', { class: 'detail-grid' }, reviewTaskCards(snapshot.reviewTasks))] : [
+        element('p', { class: 'notice' }, ['No hay tareas de revisión prioritarias con la evidencia actual.'])
+      ])
+    ])
+  ]);
+
+  const visualNoise = [
+    ...(snapshot.colors.systemHiddenVisualNoise || []),
+    ...(snapshot.typography.systemHiddenVisualNoise || [])
+  ];
+  const visualSystemPanel = element('section', {
+    class: 'tabpanel',
+    id: 'contextic-tabpanel-sistema',
+    role: 'tabpanel',
+    'aria-labelledby': 'contextic-tab-sistema',
+    tabindex: '0',
+    hidden: ''
+  }, [
+    element('section', { class: 'section' }, [
       element('h3', { class: 'section-title' }, [
-        'Colores principales',
+        'Colores',
         element('span', {}, [`${snapshot.colors.colors.length} muestras`])
       ]),
       swatches
     ]),
     element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Componentes']),
+      element('h3', { class: 'section-title' }, ['Tipografía']),
+      tokenList(snapshot.typography.typeStyles || [], styleTokenLabel, 'No se detectan estilos tipográficos.')
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Espaciado, radios, sombras y bordes']),
+      element('div', { class: 'detail-grid' }, [
+        tokenGroup('Espaciado', snapshot.spacing.spacingScale || []),
+        tokenGroup('Radios', snapshot.spacing.radii || []),
+        tokenGroup('Sombras', snapshot.spacing.shadows || []),
+        tokenGroup('Bordes', snapshot.spacing.borders || [])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Variables CSS']),
+      tokenList(snapshot.colors.cssVariables || [], cssVariableLabel, 'No se detectaron variables CSS.')
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Inventario de componentes']),
       element('div', { class: 'component-line' }, [
         element('span', {}, [componentSummary]),
         element('span', { class: 'pill' }, [`${snapshot.components.counts.ctaGroups} grupos CTA`])
       ])
     ]),
     element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Clasificación']),
-      element('div', { class: 'component-line' }, [
-        element('span', {}, [`${classification.archetype || 'unknown'} · ${classification.confidence || 'low'}`]),
-        element('span', { class: 'pill' }, [classification.analysisMode || 'snapshot_only'])
-      ])
+      element('h3', { class: 'section-title' }, ['Ruido visual del sistema']),
+      tokenList(visualNoise, visualNoiseLabel, 'No se detecta ruido visual oculto del sistema.')
     ]),
     element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, [classification.analysisMode === 'full_behavioral' ? 'Mapa behavioral' : 'Revisión manual']),
-      ...(classification.analysisMode === 'full_behavioral'
-        ? (mappingRows.length ? [element('div', { class: 'mapping-list' }, mappingRows)] : [element('p', { class: 'notice' }, ['No hay mapa behavioral disponible.'])])
-        : [element('p', { class: 'notice' }, ['No se generan recomendaciones de conversión con la matriz behavioral actual para este arquetipo.'])])
-    ]),
-    element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Lente conductual']),
-      ...(classification.analysisMode === 'full_behavioral' ? [
-        element('p', { class: 'notice' }, [uxFrictionCount ? 'Hay fricciones UX de alta confianza; revisar tarjetas de hipótesis antes de actuar.' : 'No se detectan fricciones UX de alta confianza. Los bloques a revisar son revisión, no bloqueo crítico.'])
-      ] : [
-        element('p', { class: 'notice' }, ['Salida acotada a snapshot, inventario, accesibilidad y notas manuales.'])
-      ])
-    ]),
-    element('section', { class: 'section' }, [
-      element('h3', { class: 'section-title' }, ['Hallazgos principales']),
-      ...(topFindingNodes.length ? [element('div', { class: 'top-findings' }, topFindingNodes)] : [
-        element('p', { class: 'notice' }, ['No hay hallazgos priorizados. Revisa el markdown para baseline y notas manuales.'])
+      element('h3', { class: 'section-title' }, ['Hallazgos de sistema']),
+      ...(findingGroups.designSystem.length ? [element('div', { class: 'top-findings' }, findingCards(findingGroups.designSystem.slice(0, 4), 'Sistema'))] : [
+        element('p', { class: 'notice' }, ['No hay hallazgos de sistema priorizados en esta captura.'])
       ])
     ])
   ]);
 
-  const copyButtons = [
-    element('button', { class: 'copy primary', type: 'button', 'data-copy': 'design' }, ['Copiar design-context.md']),
-    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'json' }, ['Copiar JSON']),
-    element('button', { class: 'copy secondary', type: 'button', 'data-copy': 'issue' }, ['Copiar issue GitHub'])
-  ];
+  const exportPanel = element('section', {
+    class: 'tabpanel',
+    id: 'contextic-tabpanel-exportar',
+    role: 'tabpanel',
+    'aria-labelledby': 'contextic-tab-exportar',
+    tabindex: '0',
+    hidden: ''
+  }, [
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Exportar']),
+      element('div', { class: 'actions' }, [
+        copyButtons[0],
+        element('div', { class: 'secondary-actions' }, [copyButtons[1], copyButtons[2]]),
+        copyStatus
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Resumen para traspaso']),
+      element('div', { class: 'detail-card' }, [
+        element('p', {}, [handoffSummary(snapshot, summaryText)])
+      ])
+    ]),
+    element('section', { class: 'section' }, [
+      element('h3', { class: 'section-title' }, ['Métricas recomendadas']),
+      tokenList(recommendedMetrics(snapshot), metricLabel, 'No hay métricas recomendadas con la evidencia actual.')
+    ])
+  ]);
 
-  const copyStatus = element('p', { class: 'notice', 'data-copy-status': '' }, [
-    'Salida heurística. Úsala como apoyo de revisión de producto/diseño, no como verdad absoluta.'
+  const tabButtons = [
+    element('button', { class: 'tab', id: 'contextic-tab-diagnostico', type: 'button', role: 'tab', 'aria-selected': 'true', 'aria-controls': 'contextic-tabpanel-diagnostico', tabindex: '0' }, ['Diagnóstico']),
+    element('button', { class: 'tab', id: 'contextic-tab-sistema', type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-controls': 'contextic-tabpanel-sistema', tabindex: '-1' }, ['Sistema visual']),
+    element('button', { class: 'tab', id: 'contextic-tab-exportar', type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-controls': 'contextic-tabpanel-exportar', tabindex: '-1' }, ['Exportar'])
+  ];
+  const tabPanels = [diagnosticPanel, visualSystemPanel, exportPanel];
+  const body = element('div', { class: 'body' }, [
+    element('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Secciones de Contextic' }, tabButtons),
+    diagnosticPanel,
+    visualSystemPanel,
+    exportPanel
   ]);
 
   const panel = element('div', { class: 'panel', role: 'dialog', 'aria-modal': 'false', 'aria-labelledby': 'contextic-title' }, [
@@ -5380,17 +5549,12 @@ function renderPanel(snapshot) {
         element('div', {}, [
           element('p', { class: 'kicker' }, ['Contexto de diseño']),
           element('h2', { id: 'contextic-title' }, ['Contextic']),
-          element('p', { class: 'subtitle' }, ['Evidencia, confianza e hipótesis listas para handoff.'])
+          element('p', { class: 'subtitle' }, ['Evidencia, confianza e hipótesis listas para traspaso.'])
         ])
       ]),
       closeButton
     ]),
-    body,
-    element('div', { class: 'actions' }, [
-      copyButtons[0],
-      element('div', { class: 'secondary-actions' }, [copyButtons[1], copyButtons[2]]),
-      copyStatus
-    ])
+    body
   ]);
 
   shadow.append(style, panel);
@@ -5403,6 +5567,33 @@ function renderPanel(snapshot) {
       removePanel();
     }
   });
+  tabButtons.forEach((button, index) => {
+    button.addEventListener('click', () => selectTab(index));
+    button.addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const nextIndex = event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? tabButtons.length - 1
+          : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabButtons.length) % tabButtons.length;
+      selectTab(nextIndex);
+      tabButtons[nextIndex].focus();
+    });
+  });
+  function selectTab(activeIndex) {
+    tabButtons.forEach((button, index) => {
+      const selected = index === activeIndex;
+      button.setAttribute('aria-selected', String(selected));
+      button.setAttribute('tabindex', selected ? '0' : '-1');
+      tabPanels[index].classList.toggle('is-active', selected);
+      if (selected) {
+        tabPanels[index].removeAttribute('hidden');
+      } else {
+        tabPanels[index].setAttribute('hidden', '');
+      }
+    });
+  }
   closeButton.focus({ preventScroll: true });
   copyButtons.forEach(button => {
     button.addEventListener('click', async () => {
@@ -5424,6 +5615,172 @@ function metric(label, value) {
   ]);
 }
 
+function tokenGroup(label, tokens = []) {
+  const sample = tokens.slice(0, 4).map(token => token.value || token.name || String(token)).join(' · ');
+  return element('div', { class: 'detail-card' }, [
+    element('strong', {}, [label]),
+    element('p', {}, [sample || 'Sin muestras detectadas.'])
+  ]);
+}
+
+function tokenList(items = [], formatter = String, emptyText = 'Sin datos detectados.') {
+  if (!items.length) return element('p', { class: 'notice' }, [emptyText]);
+  return element('div', { class: 'token-list' }, items.slice(0, 8).map(item => {
+    const formatted = formatter(item);
+    return element('div', { class: 'token-line' }, [
+      element('span', {}, [formatted.label]),
+      element('span', { class: 'pill' }, [formatted.meta])
+    ]);
+  }));
+}
+
+function styleTokenLabel(token = {}) {
+  return {
+    label: token.value || `${token.fontSize || 'tamaño desconocido'} / ${token.lineHeight || 'interlínea desconocida'}`,
+    meta: `${token.count || 1} uso(s)`
+  };
+}
+
+function cssVariableLabel(variable = {}) {
+  return {
+    label: `${variable.name || 'variable sin nombre'}: ${variable.value || 'valor desconocido'}`,
+    meta: variable.visibleUsage === false ? 'sin uso visible' : 'uso visible'
+  };
+}
+
+function visualNoiseLabel(item = {}) {
+  return {
+    label: item.reason || item.value || item.name || 'Señal visual oculta',
+    meta: item.count ? `${item.count} uso(s)` : 'revisar'
+  };
+}
+
+function metricLabel(metric = '') {
+  return {
+    label: spanishMetricLabel(metric),
+    meta: 'métrica'
+  };
+}
+
+function findingCards(findings = [], type = 'Hallazgo') {
+  return findings.map(finding => element('div', { class: `friction ${severityClass(finding.severity)}` }, [
+    element('strong', {}, [
+      element('span', {}, [
+        element('span', { class: 'finding-type' }, [type]),
+        ' ',
+        finding.title || 'Hallazgo sin título'
+      ]),
+      element('span', { class: 'pill' }, [finding.priority || 'Revisión'])
+    ]),
+    element('p', {}, [`${confidenceLabel(finding.confidence)} · ${finding.rationale || finding.recommendation || 'Revisar evidencia en el export completo.'}`])
+  ]));
+}
+
+function hypothesisCards(hypotheses = []) {
+  return hypotheses.map(hypothesis => element('div', { class: 'detail-card' }, [
+    element('strong', {}, [hypothesis.title || 'Hipótesis sin título']),
+    element('p', {}, [hypothesis.ifWe || hypothesis.rationale || 'Validar con experimento o revisión cualitativa.'])
+  ]));
+}
+
+function reviewTaskCards(tasks = []) {
+  return tasks.slice(0, 6).map(task => element('div', { class: 'detail-card' }, [
+    element('strong', {}, [task.question || 'Revisar evidencia']),
+    element('p', {}, [task.whyItMatters || task.howToValidate || 'Validar manualmente antes de implementar.'])
+  ]));
+}
+
+function recommendedMetrics(snapshot = {}) {
+  const metrics = new Set();
+  for (const hypothesis of snapshot.hypotheses || []) {
+    if (hypothesis.metrics?.primary) metrics.add(hypothesis.metrics.primary);
+    for (const metric of hypothesis.metrics?.secondary || []) metrics.add(metric);
+    for (const metric of hypothesis.metrics?.guardrail || []) metrics.add(metric);
+  }
+  for (const block of snapshot.behavioralMapping || []) for (const metric of block.metrics || []) metrics.add(metric);
+  for (const section of snapshot.behavioralRecommendation?.sections || []) for (const metric of section.metrics || []) metrics.add(metric);
+  return Array.from(metrics);
+}
+
+function handoffSummary(snapshot = {}, fallback = '') {
+  const topHypothesis = (snapshot.hypotheses || [])[0];
+  const topTask = (snapshot.reviewTasks || [])[0];
+  if (topHypothesis) {
+    return `${topHypothesis.title || 'Hipótesis principal'}. Medir ${spanishMetricLabel(topHypothesis.metrics?.primary || 'la métrica principal')} y validar antes de implementar.`;
+  }
+  if (topTask) return `${topTask.question || 'Tarea de revisión principal'}. ${topTask.howToValidate || 'Validar con revisión manual.'}`;
+  return fallback || 'Exportación lista para traspaso con evidencia DOM/CSS y notas de revisión.';
+}
+
+function colorRoleLabel(role = '') {
+  const unsure = String(role).endsWith('?');
+  const clean = String(role).replace(/\?$/, '');
+  const labels = {
+    text: 'texto',
+    background: 'fondo',
+    primary: 'primario',
+    secondary: 'secundario',
+    accent: 'acento',
+    brand: 'marca',
+    border: 'borde',
+    focus: 'foco',
+    shadow: 'sombra',
+    error: 'error',
+    success: 'éxito',
+    warning: 'aviso',
+    info: 'información',
+    utility: 'utilidad',
+    unknown: 'desconocido'
+  };
+  return `${labels[clean] || clean || 'desconocido'}${unsure ? '?' : ''}`;
+}
+
+function behavioralBlockTypeLabel(value = '') {
+  const labels = {
+    what: 'qué',
+    why: 'por qué',
+    why_not: 'por qué no',
+    who: 'para quién',
+    how: 'cómo',
+    where: 'dónde actuar',
+    when: 'cuándo'
+  };
+  return labels[value] || value || 'bloque';
+}
+
+function spanishMetricLabel(value = '') {
+  return String(value || '')
+    .replace(/primary CTA CTR/gi, 'CTR del CTA principal')
+    .replace(/primary task completion rate/gi, 'tasa de finalización de la tarea principal')
+    .replace(/task completion rate for affected interaction/gi, 'tasa de finalización de la interacción afectada')
+    .replace(/component\/token reuse rate/gi, 'tasa de reutilización de componentes y tokens')
+    .replace(/qualified conversion rate/gi, 'tasa de conversión cualificada')
+    .replace(/secondary CTA clicks/gi, 'clics en CTA secundarios')
+    .replace(/bounce/gi, 'rebote')
+    .replace(/accessibility regressions/gi, 'regresiones de accesibilidad')
+    .replace(/guardrails/gi, 'controles de seguridad');
+}
+
+function classificationLabel(value = '') {
+  const labels = {
+    landing: 'landing',
+    product: 'producto',
+    article: 'contenido',
+    dashboard: 'dashboard',
+    unknown: 'desconocido'
+  };
+  return labels[value] || value || 'desconocido';
+}
+
+function analysisModeLabel(value = '') {
+  const labels = {
+    full_behavioral: 'behavioral completo',
+    limited_behavioral: 'behavioral limitado',
+    snapshot_only: 'solo snapshot'
+  };
+  return labels[value] || 'solo snapshot';
+}
+
 function presenceLabel(value = '') {
   if (value === 'sí') return 'presente';
   if (value === 'parcial') return 'parcial';
@@ -5443,24 +5800,6 @@ function blockConfidence(block = {}) {
   if (block.present === 'sí' && block.quality >= 4 && (block.evidence || []).length >= 2) return 'high';
   if (block.present === 'parcial' || (block.evidence || []).length) return 'medium';
   return 'low';
-}
-
-function topFindingsByType(groups = {}, findings = []) {
-  const buckets = [
-    ['UX', groups.ux || []],
-    ['DS', groups.designSystem || []],
-    ['Accesibilidad', groups.accessibility || []],
-    ['Revisión', [...(groups.manualReview || []), ...findings.filter(finding => finding.confidence === 'low' && finding.type !== 'manual_review')]]
-  ];
-  const items = [];
-
-  for (const [type, findings] of buckets) {
-    const finding = findings[0];
-    if (finding) items.push({ type, finding });
-    if (items.length >= 3) break;
-  }
-
-  return items;
 }
 
 function displayColorRole(color = {}) {

@@ -140,7 +140,13 @@ test('interface source uses Spanish behavioral labels instead of visible English
   assert.doesNotMatch(source, /'Weak blocks'|'Top findings'|'Manual review'/);
   assert.match(source, /behavioralBlockDisplayLabel/);
   assert.match(source, /Bloques débiles/);
-  assert.match(source, /Hallazgos principales/);
+  assert.match(source, /Fricciones UX/);
+  assert.match(source, /Sistema visual/);
+  assert.match(source, /Exportar/);
+  assert.match(source, /role: 'tablist'/);
+  assert.match(source, /role: 'tab'/);
+  assert.match(source, /role: 'tabpanel'/);
+  assert.match(source, /'aria-selected': 'true'/);
 });
 
 function vodafoneFixture(text = 'Seguro para tus dispositivos. Protege tu móvil, tablet y smartwatch hasta 3 dispositivos.', ctaText = 'Acceso a mi seguro') {
