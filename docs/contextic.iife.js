@@ -2627,25 +2627,30 @@ function generateHypotheses(findings = [], pageClassification = {}, context = {}
 
 function generateReviewTasks(findings = [], pageClassification = {}, context = {}) {
   const tasks = [];
+  const dashboardApp = isDashboardAppReview(pageClassification);
   const actionableHypothesisAreas = new Set(hypothesesFromBehavioralMapping(context.behavioralMapping || [], pageClassification).map(hypothesis => hypothesis.affectedArea).filter(Boolean));
 
   for (const finding of findings) {
     if (!finding) continue;
     if (shouldCreateHypothesis(finding, pageClassification)) continue;
+    if (dashboardApp && isBehavioralWeakBlockReviewFinding(finding)) continue;
+    if (dashboardApp && isInventoryAccessibilityReviewFinding(finding)) continue;
     tasks.push(findingToReviewTask(finding));
   }
 
-  for (const block of context.behavioralMapping || []) {
-    if (!['who', 'how', 'where', 'when'].includes(block.block)) continue;
-    if (actionableHypothesisAreas.has(block.block)) continue;
-    if (!isWeakBlock(block) && !isLightReviewSignal(block)) continue;
-    tasks.push(blockToReviewTask(block));
+  if (!dashboardApp) {
+    for (const block of context.behavioralMapping || []) {
+      if (!['who', 'how', 'where', 'when'].includes(block.block)) continue;
+      if (actionableHypothesisAreas.has(block.block)) continue;
+      if (!isWeakBlock(block) && !isLightReviewSignal(block)) continue;
+      tasks.push(blockToReviewTask(block));
+    }
   }
 
   if (isPortalArchetype(pageClassification)) {
     tasks.push(...portalReviewTasks(pageClassification, context));
   }
-  if (isDashboardAppReview(pageClassification)) {
+  if (dashboardApp) {
     tasks.push(...dashboardAppReviewTasks(context));
   }
 
@@ -2719,7 +2724,8 @@ function dashboardAppReviewTasks(context = {}) {
       evidence: [`${counts.cards} card(s) detectadas en el inventario principal.`],
       whyItMatters: 'Un dashboard con muchas cards puede perder escaneabilidad si no hay agrupación, jerarquía visual, estados vacíos/cargando y prioridades claras.',
       howToValidate: 'Revisar agrupación por tarea, títulos, densidad, estados empty/loading/error y comportamiento responsive.',
-      owner: 'design/product'
+      owner: 'design/product',
+      area: 'cards'
     });
   }
 
@@ -2729,7 +2735,8 @@ function dashboardAppReviewTasks(context = {}) {
       evidence: [`${counts.badges} badge(s) detectados.`],
       whyItMatters: 'Los badges en apps suelen comunicar estado; si el color es el único canal, el significado puede perderse.',
       howToValidate: 'Comprobar contraste, texto/icono alternativo, nombres accesibles y mapa de estados documentado.',
-      owner: 'design-system'
+      owner: 'design-system',
+      area: 'badges/status'
     });
   }
 
@@ -2739,7 +2746,8 @@ function dashboardAppReviewTasks(context = {}) {
       evidence: [`${counts.inputs || 0} campo(s) y ${counts.forms || 0} formulario(s) detectados.`],
       whyItMatters: 'En herramientas internas, un formulario ambiguo puede bloquear la tarea aunque no sea una fricción de conversión.',
       howToValidate: 'Revisar nombres accesibles, texto de ayuda, errores, foco, submit, estado disabled/loading y recuperación.',
-      owner: 'dev/design'
+      owner: 'dev/design',
+      area: 'form'
     });
   }
 
@@ -2749,7 +2757,8 @@ function dashboardAppReviewTasks(context = {}) {
       evidence: [`${counts.navigation} landmark(s) de navegación detectados.`],
       whyItMatters: 'La orientación en dashboards depende de saber dónde estás, qué rutas existen y cómo moverte con teclado.',
       howToValidate: 'Comprobar aria-current/estado activo, foco visible, orden de tabulación, landmarks y labels de rutas.',
-      owner: 'dev/design'
+      owner: 'dev/design',
+      area: 'navigation'
     });
   }
 
@@ -2759,11 +2768,25 @@ function dashboardAppReviewTasks(context = {}) {
       evidence: [`${counts.ctaGroups} grupo(s) CTA detectados.`],
       whyItMatters: 'En dashboards, las acciones deben distinguir creación, navegación, filtros o tareas destructivas sin sesgo de conversión.',
       howToValidate: 'Mapear cada acción a la tarea esperada, confirmar jerarquía visual, estados y etiquetas de botones.',
-      owner: 'design/product'
+      owner: 'design/product',
+      area: 'cta_group'
     });
   }
 
   return tasks;
+}
+
+function isInventoryAccessibilityReviewFinding(finding = {}) {
+  const id = String(finding.id || '').toLowerCase();
+  const area = String(finding.affectedArea || '').toLowerCase();
+  return finding.type === 'accessibility_risk' && (
+    /^accessibility\.(form-fields|forms|badges-status)-review$/.test(id)
+    || /^(form fields|forms|badges\/status)$/.test(area)
+  );
+}
+
+function isBehavioralWeakBlockReviewFinding(finding = {}) {
+  return finding.type === 'manual_review' && String(finding.id || '').startsWith('review.weak-block.');
 }
 
 function findingToHypothesis(finding, pageClassification, number) {
@@ -2954,7 +2977,7 @@ function reviewOwnerForBlock(block) {
 function dedupeTasks(tasks) {
   const seen = new Set();
   return tasks.filter(task => {
-    const key = task.question;
+    const key = task.area || task.question;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -2967,11 +2990,28 @@ function compareReviewTasks(a = {}, b = {}) {
 
 function reviewTaskPriority(task = {}) {
   const text = `${task.question || ''} ${(task.evidence || []).join(' ')}`.toLowerCase();
+  const area = reviewTaskArea(task);
+  if (area === 'cards') return 0;
+  if (area === 'badges/status') return 1;
+  if (area === 'form') return 2;
+  if (area === 'navigation') return 3;
+  if (area === 'cta_group') return 4;
   if (/cta principal|asegura tu m[oó]vil|objetivo real de la p[aá]gina/.test(text)) return 0;
   if (/cta|d[oó]nde actuar|jerarqu/.test(text)) return 1;
   if (/target|audiencia|para qui[eé]n/.test(text)) return 2;
   if (/proceso|despu[eé]s|c[oó]mo/.test(text)) return 3;
   return 4;
+}
+
+function reviewTaskArea(task = {}) {
+  if (task.area) return task.area;
+  const text = `${task.question || ''} ${(task.evidence || []).join(' ')}`.toLowerCase();
+  if (/cards?|tarjetas?|densidad|agrupaci[oó]n/.test(text)) return 'cards';
+  if (/badges?|status|estados visuales/.test(text)) return 'badges/status';
+  if (/formulario|form field|campo|labels?|help text|errores|submit/.test(text)) return 'form';
+  if (/navegaci[oó]n|rutas|orden de teclado|estado actual/.test(text)) return 'navigation';
+  if (/cta group|grupo cta|jerarqu[ií]a primaria\/secundaria/.test(text)) return 'cta_group';
+  return '';
 }
 
 function becauseText(finding) {
@@ -4128,10 +4168,13 @@ function buildDesignContextMarkdown(snapshot) {
   const pageClassification = report.pageClassification || {};
   const scopeMap = report.scopeMap || {};
   const findings = report.findings || [];
-  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping });
-  const reviewTasks = report.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping });
+  const hypotheses = report.hypotheses || generateHypotheses(findings, pageClassification, { behavioralMapping, components });
+  const reviewTasks = report.reviewTasks || generateReviewTasks(findings, pageClassification, { behavioralMapping, components });
   const findingGroups = groupFindings(findings);
-  const lowConfidenceFindings = findings.filter(finding => finding.confidence === 'low' || finding.priority === 'Review');
+  const isAppReview = pageClassification.analysisMode === 'app_usability_review' || pageClassification.reviewModel === 'dashboard_app';
+  const lowConfidenceFindings = findings.filter(finding => (finding.confidence === 'low' || finding.priority === 'Review')
+    && finding.type !== 'accessibility_risk'
+    && !(isAppReview && finding.type === 'manual_review' && String(finding.id || '').startsWith('review.weak-block.')));
   const fullBehavioral = pageClassification.analysisMode === 'full_behavioral';
 
   return `# design-context.md — Contextic
@@ -4198,7 +4241,7 @@ ${buildSystemHiddenVisualNoise({ colors, typography, components })}
 ${buildComponentInventoryRows(components)}
 
 ### Patrones UI observados
-${buildPatternList(components, behavioralMapping)}
+${buildPatternList(components, behavioralMapping, pageClassification)}
 
 ## Evaluación behavioral
 
@@ -4222,7 +4265,7 @@ ${buildAccessibilityFindingList(findingGroups.accessibility, report.detectedComp
 
 ## Hallazgos de baja confianza
 
-${buildFindingList(lowConfidenceFindings)}
+${buildLowConfidenceFindingList(lowConfidenceFindings, findingGroups.accessibility)}
 
 ## Tareas de revisión
 
@@ -4249,7 +4292,7 @@ ${buildWhatWorks(behavioralMapping)}
 ${buildHighConfidenceRisks(findings)}
 
 ### Elementos de revisión manual
-${buildManualReviewSummary(reviewTasks)}
+${buildManualReviewSummary(reviewTasks, pageClassification)}
 
 ### Tarea principal de revisión
 ${buildTopReviewTask(reviewTasks)}
@@ -4562,6 +4605,24 @@ function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses =
   const blockCategories = categorizeBehavioralBlocks(behavioralMapping);
   const topProductHypothesis = hypotheses.find(hypothesis => !isSystemHypothesis(hypothesis));
   const topSystemHypothesis = hypotheses.find(isSystemHypothesis);
+  const isAppReview = pageClassification.analysisMode === 'app_usability_review' || pageClassification.reviewModel === 'dashboard_app';
+  const appReviewCount = reviewTasks.filter(isDashboardAppReviewTask).length;
+  const accessibilityReviewCount = findingGroups.accessibility?.length || 0;
+  if (isAppReview) {
+    return [
+      `- Observado: ${findings.length} hallazgo(s), ${findingGroups.designSystem?.length || 0} deuda(s) de sistema de diseño, ${accessibilityReviewCount} revisión(es) de accesibilidad.`,
+      `- Inferido: arquetipo ${pageClassification.archetype || 'unknown'} con confianza ${pageClassification.confidence || 'low'}.`,
+      highConfidenceRisks.length
+        ? `- Riesgos UX de alta confianza: ${highConfidenceRisks.map(finding => finding.title).slice(0, 3).join('; ')}.`
+        : `- No se detectan fricciones UX de alta confianza; se recomiendan ${appReviewCount} revisiones de app y ${accessibilityReviewCount} revisiones de accesibilidad.`,
+      `- Revisiones de app recomendadas: ${appReviewCount}.`,
+      `- Revisiones de accesibilidad recomendadas: ${accessibilityReviewCount}.`,
+      '- No se generan hipótesis de conversión para dashboards/apps.',
+      reviewTasks[0]
+        ? `- Tarea principal de revisión: ${reviewTasks[0].question}`
+        : '- No se generó tarea de revisión.'
+    ].join('\n');
+  }
   const lines = [
     `- Observado: ${findings.length} hallazgo(s), ${findingGroups.designSystem?.length || 0} deuda(s) de sistema de diseño, ${findingGroups.accessibility?.length || 0} hallazgo(s) de accesibilidad.`,
     `- Inferido: arquetipo ${pageClassification.archetype || 'unknown'} con confianza ${pageClassification.confidence || 'low'}.`,
@@ -4648,6 +4709,12 @@ function confidenceNote(confidence = 'low', fallback = '') {
 function buildFindingList(findings = []) {
   if (!findings.length) return '- No se detectan hallazgos en esta categoría.';
   return findings.map(formatFinding).join('\n\n');
+}
+
+function buildLowConfidenceFindingList(findings = [], accessibilityFindings = []) {
+  if (findings.length) return buildFindingList(findings);
+  if (accessibilityFindings.length) return '- No hay hallazgos adicionales de baja confianza fuera de accesibilidad.';
+  return '- No se detectan hallazgos en esta categoría.';
 }
 
 function buildAccessibilityFindingList(findings = [], detectedComponents = []) {
@@ -5053,9 +5120,31 @@ function buildTokenRows(colors, typography, spacing) {
   return rows.join('\n');
 }
 
-function buildPatternList(components, behavioralMapping) {
+function buildPatternList(components, behavioralMapping, pageClassification = {}) {
   const patterns = [];
   const counts = components.counts || {};
+  const isAppReview = pageClassification.archetype === 'dashboard_or_app' || pageClassification.analysisMode === 'app_usability_review' || pageClassification.reviewModel === 'dashboard_app';
+  if (pageClassification.archetype === 'ecommerce_category') {
+    if (counts.navigation) patterns.push('- Navegación de categoría');
+    if (counts.cards >= 3) patterns.push('- Cards/listado de producto');
+    if (counts.forms || counts.inputs) patterns.push('- Filtros o formulario de refinamiento');
+    if (counts.buttons) patterns.push('- Acciones de compra o exploración');
+    return patterns.join('\n') || '- No se detectan patrones UI suficientes por heurística.';
+  }
+  if (pageClassification.archetype === 'checkout_or_form_flow') {
+    if (counts.forms || counts.inputs) patterns.push('- Flujo de formulario');
+    if (counts.buttons) patterns.push('- Acciones de avance o envío');
+    if (counts.navigation) patterns.push('- Navegación de flujo');
+    return patterns.join('\n') || '- No se detectan patrones UI suficientes por heurística.';
+  }
+  if (isAppReview) {
+    if (counts.navigation) patterns.push('- Navegación de aplicación');
+    if (counts.cards >= 3) patterns.push('- Cards/listado de contenido');
+    if (counts.forms || counts.inputs) patterns.push('- Formulario de filtro/gestión');
+    if (counts.badges) patterns.push('- Badges/status');
+    if (counts.ctaGroups || counts.buttons) patterns.push('- Grupo de acciones de app');
+    return patterns.join('\n') || '- No se detectan patrones UI suficientes por heurística.';
+  }
   const hasWhat = behavioralMapping.find(block => block.block === 'what')?.present;
   const hasWhyNot = behavioralMapping.find(block => block.block === 'why_not')?.present;
   if (hasWhat && hasWhat !== 'no') patterns.push('- Hero');
@@ -5148,9 +5237,28 @@ function buildHighConfidenceRisks(findings = []) {
   return risks.join('\n') || '- No se detectan fricciones UX de alta confianza.';
 }
 
-function buildManualReviewSummary(reviewTasks = []) {
+function buildManualReviewSummary(reviewTasks = [], pageClassification = {}) {
+  if (pageClassification.archetype === 'dashboard_or_app' || pageClassification.analysisMode === 'app_usability_review' || pageClassification.reviewModel === 'dashboard_app') {
+    return buildAppManualReviewSummary(reviewTasks);
+  }
   const items = uniqueReviewTasks(reviewTasks).map(task => `- [${reviewTaskTag(task)}] ${reviewTaskSummary(task)}`);
   return items.join('\n') || '- No hay señales de revisión ligera con la evidencia actual.';
+}
+
+function buildAppManualReviewSummary(reviewTasks = []) {
+  const lines = [];
+  const seen = new Set();
+  for (const task of reviewTasks) {
+    const area = appReviewArea(task);
+    if (!area || seen.has(area)) continue;
+    seen.add(area);
+    if (area === 'cards') lines.push('- [Cards/listado] Validar densidad, agrupación, jerarquía y estados.');
+    if (area === 'badges/status') lines.push('- [Badges/status] Validar significado, contraste y accesibilidad.');
+    if (area === 'form') lines.push('- [Formulario] Validar labels, ayuda, errores y estados.');
+    if (area === 'navigation') lines.push('- [Navegación] Validar estado actual, foco y rutas.');
+    if (area === 'cta_group') lines.push('- [Acciones] Validar jerarquía primaria/secundaria y acción esperada.');
+  }
+  return lines.join('\n') || '- No hay revisiones de app recomendadas con la evidencia actual.';
 }
 
 function buildDesignSystemDebtSummary(findings = []) {
@@ -5215,6 +5323,21 @@ function reviewTaskSummary(task = {}) {
   if (tag === 'Dónde actuar / where') return 'Validar si el CTA principal responde al objetivo de negocio.';
   if (tag === 'Cuándo / when') return 'Validar si existe urgencia real o solo límites de valor/cobertura.';
   return question || 'Validar la señal antes de proponer cambios.';
+}
+
+function isDashboardAppReviewTask(task = {}) {
+  return Boolean(appReviewArea(task));
+}
+
+function appReviewArea(task = {}) {
+  if (task.area) return task.area;
+  const text = `${task.question || ''} ${(task.evidence || []).join(' ')}`.toLowerCase();
+  if (/cards?|tarjetas?|densidad|agrupaci[oó]n/.test(text)) return 'cards';
+  if (/badges?|status|estados visuales/.test(text)) return 'badges/status';
+  if (/formulario|form field|campo|labels?|help text|errores|submit/.test(text)) return 'form';
+  if (/navegaci[oó]n|rutas|orden de teclado|estado actual/.test(text)) return 'navigation';
+  if (/cta group|grupo cta|jerarqu[ií]a primaria\/secundaria/.test(text)) return 'cta_group';
+  return '';
 }
 
 function categorizeBehavioralBlocks(behavioralMapping = []) {

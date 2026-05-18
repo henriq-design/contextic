@@ -148,6 +148,87 @@ test('GitHub issue compatibility export stays wired to the new export', () => {
   assert.equal(buildGitHubIssueMarkdown(snapshot), buildGithubIssueExport(snapshot));
 });
 
+test('dashboard app usability review output is specific and avoids landing noise', () => {
+  const snapshot = createSnapshot({
+    meta: {
+      url: 'https://privatearea.grupoanaya.es/anaya/dashboard',
+      title: 'Área privada Anaya dashboard',
+      generatedAt: '2026-05-09T10:00:00.000Z',
+      viewport: { width: 1440, height: 900 }
+    },
+    pageClassification: {
+      archetype: 'dashboard_or_app',
+      confidence: 'medium',
+      analysisMode: 'app_usability_review',
+      reviewModel: 'dashboard_app',
+      signals: ['Señales fuertes de dashboard, panel y usuario autenticado.']
+    },
+    components: {
+      counts: {
+        buttons: 2,
+        links: 8,
+        inputs: 1,
+        forms: 1,
+        cards: 104,
+        alerts: 0,
+        navigation: 1,
+        images: 0,
+        badges: 11,
+        dialogs: 0,
+        ctaGroups: 1
+      },
+      samples: {
+        buttons: [{ text: 'Buscar' }],
+        unlabeledInputs: [],
+        disabledControls: [],
+        genericLinks: [],
+        imagesWithoutAlt: [],
+        badges: ['span.badge'],
+        dialogs: [],
+        ctaGroups: [{ selector: '.dashboard-actions', actions: ['Buscar', 'Filtrar'] }]
+      }
+    },
+    frictions: [],
+    behavioralMapping: [
+      {
+        block: 'where',
+        displayLabel: 'Dónde actuar',
+        present: 'parcial',
+        quality: 2,
+        evidence: ['CTA detectado en dashboard.'],
+        missing: ['Validar objetivo real del CTA.'],
+        severity: 2,
+        diagnostics: {
+          ctaAssessment: {
+            primary: { cleanLabel: 'Buscar', region: 'main' }
+          }
+        }
+      }
+    ]
+  });
+  const markdown = buildDesignContextMarkdown(snapshot);
+  const summary = markdown.split('## Resumen ejecutivo')[1].split('## Snapshot de sistema de diseño')[0];
+  const lowConfidence = markdown.split('## Hallazgos de baja confianza')[1].split('## Tareas de revisión')[0];
+  const handoff = markdown.split('## Handoff summary')[1];
+  const patterns = markdown.split('### Patrones UI observados')[1].split('## Evaluación behavioral')[0];
+  const topReview = markdown.split('### Tarea principal de revisión')[1].split('### Deuda de sistema de diseño')[0];
+
+  assert.match(markdown, /Modo de análisis: app_usability_review/);
+  assert.match(summary, /se recomiendan \d+ revisiones de app y \d+ revisiones de accesibilidad/);
+  assert.match(summary, /Revisiones de app recomendadas: 5/);
+  assert.match(summary, /Revisiones de accesibilidad recomendadas: 3/);
+  assert.doesNotMatch(markdown, /¿La señal .* requiere una intervención concreta/);
+  assert.match(topReview, /Validar densidad, agrupación, jerarquía y estados de las cards del dashboard/);
+  assert.match(lowConfidence, /No hay hallazgos adicionales de baja confianza fuera de accesibilidad/);
+  assert.doesNotMatch(handoff, /\[Cómo \/ how\]|\[Dónde actuar \/ where\]/);
+  assert.match(handoff, /\[Cards\/listado\]/);
+  assert.match(handoff, /\[Badges\/status\]/);
+  assert.match(handoff, /\[Formulario\]/);
+  assert.doesNotMatch(patterns, /Cards de beneficios o features/);
+  assert.match(patterns, /Cards\/listado de contenido/);
+  assert.match(markdown, /No se generaron hipótesis accionables/);
+});
+
 test('github issue export stays conservative when evidence is missing', () => {
   const markdown = buildGithubIssueExport({});
 

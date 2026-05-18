@@ -135,6 +135,7 @@ test('dashboard app creates inventory review tasks without conversion hypotheses
   const reviewTasks = generateReviewTasks([], dashboard, { components });
 
   assert.deepEqual(hypotheses, []);
+  assert.match(reviewTasks[0].question, /densidad, agrupación, jerarquía y estados de las cards/);
   assert.ok(reviewTasks.some(task => /densidad, agrupación, jerarquía y estados/.test(task.question)));
   assert.ok(reviewTasks.some(task => /badges\/status/.test(task.question)));
   assert.ok(reviewTasks.some(task => /labels, help text, error state/.test(task.question)));
@@ -166,6 +167,60 @@ test('dashboard component accessibility risks become low confidence review findi
   ], dashboard, { components: { counts: { badges: 11 } } });
 
   assert.ok(reviewTasks.some(task => /badges|estado/i.test(task.question)));
+  assert.doesNotMatch(JSON.stringify(reviewTasks), /¿La señal .* requiere una intervención concreta/);
+});
+
+test('dashboard app review tasks suppress generic behavioral and accessibility review questions', () => {
+  const dashboard = {
+    archetype: 'dashboard_or_app',
+    confidence: 'medium',
+    analysisMode: 'app_usability_review',
+    reviewModel: 'dashboard_app'
+  };
+  const reviewTasks = generateReviewTasks([
+    {
+      id: 'accessibility.form-fields-review',
+      type: 'accessibility_risk',
+      title: 'Revisar accesibilidad de campos de formulario',
+      evidence: ['1 campo de formulario detectado.'],
+      affectedArea: 'form fields',
+      severity: 2,
+      confidence: 'low',
+      impact: 'medium',
+      effort: 'medium',
+      priority: 'Review',
+      rationale: 'Los campos necesitan revisión accesible.'
+    },
+    {
+      id: 'accessibility.badges-status-review',
+      type: 'accessibility_risk',
+      title: 'Revisar badges y estados visuales',
+      evidence: ['11 badge(s) o labels de estado detectados.'],
+      affectedArea: 'badges/status',
+      severity: 2,
+      confidence: 'low',
+      impact: 'medium',
+      effort: 'medium',
+      priority: 'Review',
+      rationale: 'Los badges suelen codificar estado o categoría.'
+    }
+  ], dashboard, {
+    components: { counts: { cards: 104, badges: 11, inputs: 1, forms: 1, navigation: 1 } },
+    behavioralMapping: [{
+      block: 'where',
+      present: 'parcial',
+      quality: 2,
+      evidence: ['CTA detectado.'],
+      missing: ['Validar objetivo real del CTA.'],
+      diagnostics: { ctaAssessment: { primary: { cleanLabel: 'Entrar', region: 'main' } } }
+    }]
+  });
+
+  assert.match(reviewTasks[0].question, /densidad, agrupación, jerarquía y estados de las cards/);
+  assert.equal(reviewTasks.filter(task => task.area === 'form').length, 1);
+  assert.equal(reviewTasks.filter(task => task.area === 'badges/status').length, 1);
+  assert.doesNotMatch(JSON.stringify(reviewTasks), /¿La señal .* requiere una intervención concreta/);
+  assert.doesNotMatch(JSON.stringify(reviewTasks), /CTA principal ‘Entrar’/);
 });
 
 test('no high-confidence finding does not create baseline review task', () => {
