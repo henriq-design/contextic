@@ -40,10 +40,8 @@ test('contrato service_landing: Vodafone mantiene matriz behavioral y no usa rev
   assert.match(markdown, /Hipótesis principal/);
   assert.doesNotMatch(markdown, /app_usability_review|dashboard_or_app|dashboard_app/);
   assert.doesNotMatch(markdown, /Revisiones de app recomendadas|Cards\/listado|No se generan recomendaciones de conversión para dashboards\/apps/);
-  assert.doesNotMatch(markdown, /education_portal|#0d0d0d\s*\|\s*\d+\s*\|\s*(aviso|warning)/i);
-  assert.doesNotMatch(markdown, /#ffffff\s*\|\s*\d+\s*\|\s*(primario|primary)/i);
-  assert.doesNotMatch(markdown, /#000000\s*\|\s*\d+\s*\|\s*(primario|primary)/i);
-  assert.doesNotMatch(markdown, /Semantic state overrides|primario \(primary\): #ffffff/i);
+  assertNoVisibleMarkdownRoleRegressions(markdown);
+  assert.doesNotMatch(markdown, /education_portal|Semantic state overrides|primario \(primary\): #ffffff/i);
 });
 
 test('contrato education_portal: Anaya pública no se convierte en dashboard por widget externo', () => {
@@ -67,8 +65,9 @@ test('contrato education_portal: Anaya pública no se convierte en dashboard por
 
   assert.equal(json.pageClassification.archetype, 'education_portal');
   assert.notEqual(json.pageClassification.archetype, 'dashboard_or_app');
-  assert.equal(json.pageClassification.analysisMode, 'limited_behavioral');
+  assert.equal(json.pageClassification.analysisMode, 'portal_review');
   assert.match(markdown, /Arquetipo: education_portal/);
+  assert.match(markdown, /Modo de análisis: portal_review/);
   assert.match(markdown, /Validar si la home permite diferenciar rápidamente rutas para docentes, familias\/estudiantes y centros/);
   assert.match(markdown, /¿La home deja clara la orientación principal: contenido, catálogo, recursos o acceso institucional\?/);
   assert.match(markdown, /¿La jerarquía de acciones diferencia rutas principales sin competir como CTAs de conversión\?/);
@@ -79,8 +78,8 @@ test('contrato education_portal: Anaya pública no se convierte en dashboard por
   assert.doesNotMatch(markdown.split('### Variables CSS detectadas')[1].split('### Ruido visual de sistema/oculto')[0], /--bmv-/);
   assert.doesNotMatch(markdown, /app_usability_review|dashboard_app|Validar densidad, agrupación, jerarquía y estados de las cards del dashboard/);
   assert.doesNotMatch(markdown, /Revisiones de app recomendadas|No se generan recomendaciones de conversión para dashboards\/apps/);
-  assert.doesNotMatch(markdown, /\[Dónde actuar \/ where\]|CTA principal responde al objetivo de negocio|#000000\s*\|\s*\d+\s*\|\s*(aviso|warning)/i);
-  assert.doesNotMatch(markdown, /#ffffff\s*\|\s*\d+\s*\|\s*(primario|primary).*a\.btn\.inverse/i);
+  assertNoVisibleMarkdownRoleRegressions(markdown);
+  assert.doesNotMatch(markdown, /\[Dónde actuar \/ where\]|CTA principal responde al objetivo de negocio/i);
 });
 
 test('contrato dashboard_or_app: Anaya private usa revisión app sin bloques landing', () => {
@@ -113,6 +112,7 @@ test('contrato dashboard_or_app: Anaya private usa revisión app sin bloques lan
   assert.doesNotMatch(markdown, /Test: Weak block/i);
   assert.doesNotMatch(markdown, /Hipótesis de conversión/i);
   assert.doesNotMatch(markdown, /A\/B test/i);
+  assertNoVisibleMarkdownRoleRegressions(markdown);
 });
 
 test('contrato ecommerce_category: listado de producto no hereda copy de landing ni app', () => {
@@ -348,10 +348,10 @@ function contractColors() {
       {
         value: '#000000',
         count: 10,
-        suggestedRole: 'surface',
-        displayRole: 'superficie (surface)',
+        suggestedRole: 'inverse_surface',
+        displayRole: 'superficie inversa (inverse_surface)',
         roleConfidence: 'medium',
-        roleReason: 'BackgroundColor neutro mapea a superficie.',
+        roleReason: 'BackgroundColor oscuro en footer mapea a superficie inversa, no a acción primaria.',
         sample: { selector: 'footer', property: 'backgroundColor' },
         usages: [{ selector: 'footer', property: 'backgroundColor' }]
       },
@@ -511,4 +511,12 @@ function ctaFriction() {
 
 function countMatches(text, pattern) {
   return (text.match(new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+}
+
+function assertNoVisibleMarkdownRoleRegressions(markdown) {
+  assert.doesNotMatch(markdown, /#0d0d0d\s*\|\s*\d+\s*\|\s*aviso \(warning\)/i);
+  assert.doesNotMatch(markdown, /#ffffff\s*\|\s*\d+\s*\|\s*aviso \(warning\)/i);
+  assert.doesNotMatch(markdown, /#000000\s*\|\s*\d+\s*\|\s*primario \(primary\)/i);
+  assert.doesNotMatch(markdown, /#000000\s*\|\s*\d+\s*\|\s*aviso \(warning\)/i);
+  assert.doesNotMatch(markdown, /Non-destructive alert component is warning evidence/i);
 }

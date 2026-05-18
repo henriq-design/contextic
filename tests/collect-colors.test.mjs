@@ -371,7 +371,7 @@ test('white background samples are not explained as text color usage', () => {
   assert.doesNotMatch(white.roleReason, /color mapea a texto/i);
 });
 
-test('white inverse button background is surface, not primary', () => {
+test('white inverse button background is inverse button surface, not primary', () => {
   const root = tree('body', {}, [
     tree('main', {}, [
       tree('a', {
@@ -387,7 +387,8 @@ test('white inverse button background is surface, not primary', () => {
 
   assert.ok(white);
   assert.equal(white.sample.property, 'backgroundColor');
-  assert.equal(white.suggestedRole, 'surface');
+  assert.equal(white.suggestedRole, 'inverse_button_surface');
+  assert.equal(white.displayRole, 'superficie de botón inverso (inverse_button_surface)');
   assert.notEqual(white.suggestedRole, 'primary');
 });
 
@@ -406,7 +407,8 @@ test('black footer background is surface, not primary', () => {
 
   assert.ok(black);
   assert.equal(black.sample.property, 'backgroundColor');
-  assert.equal(black.suggestedRole, 'surface');
+  assert.equal(black.suggestedRole, 'inverse_surface');
+  assert.equal(black.displayRole, 'superficie inversa (inverse_surface)');
   assert.notEqual(black.suggestedRole, 'primary');
 });
 

@@ -875,7 +875,7 @@ const COLOR_PROPERTIES = [
   'boxShadow',
   'textShadow'
 ];
-const COLOR_ROLES = new Set(['text', 'surface', 'brand', 'primary', 'secondary', 'accent', 'border', 'focus', 'shadow', 'error', 'success', 'warning', 'info', 'utility', 'unknown']);
+const COLOR_ROLES = new Set(['text', 'surface', 'inverse_surface', 'inverse_button_surface', 'button_secondary_surface', 'brand_surface', 'brand', 'primary', 'secondary', 'accent', 'border', 'focus', 'shadow', 'error', 'success', 'warning', 'info', 'utility', 'unknown']);
 
 function collectColors(root = document.body, options = {}) {
   const limit = options.limit || 16;
@@ -1111,8 +1111,7 @@ function semanticRoleFromContext(element, context = {}) {
   if (hasSuccessComponent && (isStatus || isAlert || /\b(status|alert|message|notification|toast|validation)\b/.test(descriptor))) return { role: 'success', reason: 'Semantic status/alert component contains success/valid/completed evidence.' };
   if (isStatus && hasSuccessComponent) return { role: 'success', reason: 'role="status" contains explicit success evidence.' };
 
-  if (hasWarningComponent) return { role: 'warning', reason: 'Class, id or data attribute contains warning/caution/notice evidence.' };
-  if (isAlert && !/\b(error|danger|destructive|invalid)\b/.test(evidence)) return { role: 'warning', reason: 'Non-destructive alert component is warning evidence.' };
+  if (hasWarningComponent) return { role: 'warning', reason: 'Class, id or data attribute contains explicit warning/caution state evidence.' };
 
   if (hasInfoComponent || context.componentType === 'help') {
     return { role: 'info', reason: 'Explicit info/help/tip component evidence.' };
@@ -1269,6 +1268,15 @@ function baseRoleFromCssProperty(hex, count, contexts, variableHints, metrics) {
   const properties = contexts.map(context => context.property);
   const hasProperty = matcher => properties.some(property => matcher(normalizeCssProperty(property)));
 
+  if (hasProperty(property => property === 'backgroundcolor') && contexts.some(context => context.region === 'footer') && isDarkNeutral(hex, luminance, saturation)) {
+    return role('inverse_surface', 'medium', 'BackgroundColor oscuro en footer mapea a superficie inversa, no a acción primaria.', 'base_css_property');
+  }
+  if (hasProperty(property => property === 'backgroundcolor') && contexts.some(context => context.componentType === 'button' && isInverseOrSecondarySurfaceContext(context)) && (luminance > 0.92 || isNeutralHex(hex))) {
+    return role('inverse_button_surface', 'medium', 'BackgroundColor claro en botón inverso/secundario mapea a superficie de botón, no a primario.', 'base_css_property');
+  }
+  if (hasProperty(property => property === 'backgroundcolor') && contexts.some(context => ['header', 'nav'].includes(context.region)) && (luminance > 0.92 || isNeutralHex(hex))) {
+    return role('surface', 'medium', 'BackgroundColor neutro/claro en header/nav mapea a superficie.', 'base_css_property');
+  }
   if (hasProperty(property => property === 'backgroundcolor') && (luminance > 0.92 || isNeutralHex(hex))) {
     return role('surface', 'medium', 'BackgroundColor neutro/claro mapea a superficie.', 'base_css_property');
   }
@@ -1313,6 +1321,10 @@ function displayRoleFor(roleName) {
   return {
     text: 'texto (text)',
     surface: 'superficie (surface)',
+    inverse_surface: 'superficie inversa (inverse_surface)',
+    inverse_button_surface: 'superficie de botón inverso (inverse_button_surface)',
+    button_secondary_surface: 'superficie de botón secundario (button_secondary_surface)',
+    brand_surface: 'superficie de marca (brand_surface)',
     brand: 'marca (brand)',
     primary: 'primario (primary)',
     secondary: 'secundario (secondary)',
@@ -1335,8 +1347,10 @@ function canSemanticStateOverrideBaseColor(hex, context, metrics = {}) {
   const hasExplicitSemanticToken = hasExplicitSemanticTokenVariable(variableHints);
 
   if (property === 'boxshadow' || property === 'textshadow') return false;
-  if (context.semanticContext === 'warning' && property === 'color' && !hasExplicitSemanticToken) return false;
-  if (property === 'color' && isNeutralHex(hex) && !hasExplicitSemanticToken) return false;
+  if (property === 'color') {
+    if (context.semanticContext === 'warning') return hasExplicitSemanticToken && !isNeutralHex(hex);
+    return !isNeutralHex(hex) && Number(metrics.saturation || 0) >= 0.28;
+  }
   if (['active_navigation', 'selected', 'current', 'focus', 'disabled'].includes(context.stateContext)) return false;
   if (property === 'backgroundcolor' || property.includes('border') || property === 'outlinecolor') return true;
   return Number(metrics.saturation || 0) >= 0.28 && Number(metrics.luminance || 0) < 0.92;
@@ -1351,7 +1365,14 @@ function hasExplicitSemanticTokenVariable(variableHints = []) {
 }
 
 function isActionColor(contexts) {
-  return contexts.some(context => context.appearsInCta && normalizeCssProperty(context.property) === 'backgroundcolor');
+  return contexts.some(context => {
+    if (!context.appearsInCta || normalizeCssProperty(context.property) !== 'backgroundcolor') return false;
+    if (['hero', 'main', 'section'].includes(context.region)) return true;
+    if (['header', 'nav'].includes(context.region)) {
+      return /\b(cta|primary|main-action)\b/i.test(`${context.selector || ''} ${context.componentType || ''}`);
+    }
+    return false;
+  });
 }
 
 function isNeutralActionSurface(hex, contexts, metrics = {}) {
@@ -1370,6 +1391,14 @@ function normalizeCssProperty(property) {
 function isNeutralHex(hex) {
   const { r, g, b } = hexToRgb(hex);
   return Math.max(r, g, b) - Math.min(r, g, b) <= 12;
+}
+
+function isDarkNeutral(hex, luminance, saturation) {
+  return isNeutralHex(hex) && Number(luminance || 0) < 0.18 && Number(saturation || 0) < 0.18;
+}
+
+function isInverseOrSecondarySurfaceContext(context = {}) {
+  return /\b(inverse|secondary|tertiary|ghost|outline)\b/i.test(`${context.selector || ''} ${context.componentType || ''}`);
 }
 
 function hexToRgb(hex) {
@@ -1771,6 +1800,7 @@ const ARCHETYPES = new Set([
 ]);
 
 const FULL_BEHAVIORAL_ARCHETYPES = new Set(['landing', 'service_landing']);
+const PORTAL_REVIEW_ARCHETYPES = new Set(['home_or_portal', 'education_portal', 'content_portal', 'corporate_home', 'marketing_home']);
 
 function pageArchetypeClassifier(input = {}, root = input.root) {
   const signals = normalizeSignals(input, root);
@@ -2002,6 +2032,7 @@ function confidenceFromScore(score, signalCount) {
 function analysisModeFor(archetype, confidence) {
   if (FULL_BEHAVIORAL_ARCHETYPES.has(archetype) && confidence !== 'low') return 'full_behavioral';
   if (archetype === 'dashboard_or_app') return 'app_usability_review';
+  if (PORTAL_REVIEW_ARCHETYPES.has(archetype)) return 'portal_review';
   if (archetype === 'unknown') return 'snapshot_only';
   return 'limited_behavioral';
 }
@@ -4588,6 +4619,9 @@ function behavioralScopeNote(pageClassification = {}) {
   if (pageClassification.analysisMode === 'limited_behavioral') {
     return 'La matriz behavioral de conversión queda desactivada; se entrega snapshot, inventario, riesgos de accesibilidad y notas de revisión manual.';
   }
+  if (pageClassification.analysisMode === 'portal_review') {
+    return 'La matriz behavioral de conversión queda desactivada; se activa revisión de portal basada en rutas, orientación, audiencias y jerarquía de acciones.';
+  }
   return 'Sin señales suficientes para aplicar análisis behavioral; se entrega snapshot técnico y revisión manual.';
 }
 
@@ -4971,6 +5005,10 @@ function displayRoleForColor(role = 'unknown') {
   return {
     text: 'texto (text)',
     surface: 'superficie (surface)',
+    inverse_surface: 'superficie inversa (inverse_surface)',
+    inverse_button_surface: 'superficie de botón inverso (inverse_button_surface)',
+    button_secondary_surface: 'superficie de botón secundario (button_secondary_surface)',
+    brand_surface: 'superficie de marca (brand_surface)',
     brand: 'marca (brand)',
     primary: 'primario (primary)',
     secondary: 'secundario (secondary)',
@@ -6433,6 +6471,8 @@ function analysisModeLabel(value = '') {
   const labels = {
     full_behavioral: 'behavioral completo',
     limited_behavioral: 'behavioral limitado',
+    portal_review: 'revisión de portal',
+    app_usability_review: 'revisión de app',
     snapshot_only: 'solo snapshot'
   };
   return labels[value] || 'solo snapshot';

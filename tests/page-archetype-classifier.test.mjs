@@ -77,7 +77,7 @@ test('classifies an education home portal without treating accessibility widget 
 
   assert.equal(classification.archetype, 'education_portal');
   assert.notEqual(classification.archetype, 'dashboard_or_app');
-  assert.equal(classification.analysisMode, 'limited_behavioral');
+  assert.equal(classification.analysisMode, 'portal_review');
   assert.ok(['medium', 'low'].includes(classification.confidence));
 });
 

@@ -1019,6 +1019,8 @@ function analysisModeLabel(value = '') {
   const labels = {
     full_behavioral: 'behavioral completo',
     limited_behavioral: 'behavioral limitado',
+    portal_review: 'revisión de portal',
+    app_usability_review: 'revisión de app',
     snapshot_only: 'solo snapshot'
   };
   return labels[value] || 'solo snapshot';

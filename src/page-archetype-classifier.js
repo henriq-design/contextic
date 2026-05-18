@@ -18,6 +18,7 @@ const ARCHETYPES = new Set([
 ]);
 
 const FULL_BEHAVIORAL_ARCHETYPES = new Set(['landing', 'service_landing']);
+const PORTAL_REVIEW_ARCHETYPES = new Set(['home_or_portal', 'education_portal', 'content_portal', 'corporate_home', 'marketing_home']);
 
 export function pageArchetypeClassifier(input = {}, root = input.root) {
   const signals = normalizeSignals(input, root);
@@ -249,6 +250,7 @@ function confidenceFromScore(score, signalCount) {
 function analysisModeFor(archetype, confidence) {
   if (FULL_BEHAVIORAL_ARCHETYPES.has(archetype) && confidence !== 'low') return 'full_behavioral';
   if (archetype === 'dashboard_or_app') return 'app_usability_review';
+  if (PORTAL_REVIEW_ARCHETYPES.has(archetype)) return 'portal_review';
   if (archetype === 'unknown') return 'snapshot_only';
   return 'limited_behavioral';
 }

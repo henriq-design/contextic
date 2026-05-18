@@ -425,6 +425,9 @@ function behavioralScopeNote(pageClassification = {}) {
   if (pageClassification.analysisMode === 'limited_behavioral') {
     return 'La matriz behavioral de conversión queda desactivada; se entrega snapshot, inventario, riesgos de accesibilidad y notas de revisión manual.';
   }
+  if (pageClassification.analysisMode === 'portal_review') {
+    return 'La matriz behavioral de conversión queda desactivada; se activa revisión de portal basada en rutas, orientación, audiencias y jerarquía de acciones.';
+  }
   return 'Sin señales suficientes para aplicar análisis behavioral; se entrega snapshot técnico y revisión manual.';
 }
 
@@ -808,6 +811,10 @@ function displayRoleForColor(role = 'unknown') {
   return {
     text: 'texto (text)',
     surface: 'superficie (surface)',
+    inverse_surface: 'superficie inversa (inverse_surface)',
+    inverse_button_surface: 'superficie de botón inverso (inverse_button_surface)',
+    button_secondary_surface: 'superficie de botón secundario (button_secondary_surface)',
+    brand_surface: 'superficie de marca (brand_surface)',
     brand: 'marca (brand)',
     primary: 'primario (primary)',
     secondary: 'secundario (secondary)',
