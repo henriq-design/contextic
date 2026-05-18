@@ -265,7 +265,8 @@ export function buildTokensSnapshot(snapshot) {
 
 function buildColorRows(colors = {}) {
   const rows = (colors.colors || []).slice(0, 12).map(color => {
-    const observedUse = color.sample ? `${color.sample.property} en ${color.sample.selector}` : 'desconocido';
+    const observed = color.roleDeterminingUse || color.observedUse || color.sample;
+    const observedUse = observed ? `${observed.property} en ${observed.selector}` : 'desconocido';
     const confidence = color.roleConfidence || roleConfidenceFromName(color.suggestedRole);
     const reason = color.roleReason || (confidence === 'low' || confidence === 'unknown' ? 'Confianza baja: evidencia contextual insuficiente.' : 'Rol inferido desde el uso del color.');
     return `| ${color.value} | ${color.count} | ${color.displayRole || displayRoleForColor(color.suggestedRole)} | ${confidence} | ${escapePipes(observedUse)} | ${escapePipes(translateRoleReason(reason))} |`;

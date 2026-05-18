@@ -559,7 +559,65 @@ test('dark neutral header color is not primary without CTA background evidence',
 
   assert.ok(grey);
   assert.notEqual(grey.suggestedRole, 'primary');
-  assert.ok(['surface', 'unknown'].includes(grey.suggestedRole));
+  assert.equal(grey.suggestedRole, 'inverse_surface');
+});
+
+test('role determining use stays aligned when the same color has text, surface and shadow uses', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('span', {
+        text: 'Texto inverso',
+        style: { color: '#000000' }
+      }),
+      tree('div', {
+        className: 'panel-shadow',
+        style: { boxShadow: '0 8px 24px #000000' }
+      })
+    ]),
+    tree('footer', {}, [
+      tree('div', {
+        text: 'Footer',
+        style: { backgroundColor: '#000000' }
+      })
+    ])
+  ]);
+
+  const black = collectColors(root).colors.find(color => color.value === '#000000');
+
+  assert.ok(black);
+  assert.equal(black.suggestedRole, 'inverse_surface');
+  assert.equal(black.dominantUse.property, 'color');
+  assert.equal(black.roleDeterminingUse.property, 'backgroundColor');
+  assert.equal(black.roleDeterminingUse.selector, 'div');
+  assert.equal(black.observedUse.property, 'backgroundColor');
+  assert.match(black.roleReason, /BackgroundColor oscuro/i);
+});
+
+test('inverse button surface does not use header background as observed evidence', () => {
+  const root = tree('body', {}, [
+    tree('header', {}, [
+      tree('div', {
+        className: 'header-shell',
+        style: { backgroundColor: '#ffffff' }
+      })
+    ]),
+    tree('main', {}, [
+      tree('a', {
+        text: 'Volver',
+        className: 'btn inverse',
+        attributes: { href: '/inicio' },
+        style: { backgroundColor: '#ffffff' }
+      })
+    ])
+  ]);
+
+  const white = collectColors(root).colors.find(color => color.value === '#ffffff');
+
+  assert.ok(white);
+  assert.equal(white.suggestedRole, 'inverse_button_surface');
+  assert.equal(white.roleDeterminingUse.property, 'backgroundColor');
+  assert.equal(white.roleDeterminingUse.selector, 'a.btn.inverse');
+  assert.notEqual(white.roleDeterminingUse.selector, 'div.header-shell');
 });
 
 function tree(tag, options = {}, children = []) {

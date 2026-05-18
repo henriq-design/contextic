@@ -41,6 +41,7 @@ test('contrato service_landing: Vodafone mantiene matriz behavioral y no usa rev
   assert.doesNotMatch(markdown, /app_usability_review|dashboard_or_app|dashboard_app/);
   assert.doesNotMatch(markdown, /Revisiones de app recomendadas|Cards\/listado|No se generan recomendaciones de conversión para dashboards\/apps/);
   assertNoVisibleMarkdownRoleRegressions(markdown);
+  assertNoColorTraceabilityRegressions(markdown);
   assert.doesNotMatch(markdown, /education_portal|Semantic state overrides|primario \(primary\): #ffffff/i);
 });
 
@@ -79,6 +80,7 @@ test('contrato education_portal: Anaya pública no se convierte en dashboard por
   assert.doesNotMatch(markdown, /app_usability_review|dashboard_app|Validar densidad, agrupación, jerarquía y estados de las cards del dashboard/);
   assert.doesNotMatch(markdown, /Revisiones de app recomendadas|No se generan recomendaciones de conversión para dashboards\/apps/);
   assertNoVisibleMarkdownRoleRegressions(markdown);
+  assertNoColorTraceabilityRegressions(markdown);
   assert.doesNotMatch(markdown, /\[Dónde actuar \/ where\]|CTA principal responde al objetivo de negocio/i);
 });
 
@@ -113,6 +115,56 @@ test('contrato dashboard_or_app: Anaya private usa revisión app sin bloques lan
   assert.doesNotMatch(markdown, /Hipótesis de conversión/i);
   assert.doesNotMatch(markdown, /A\/B test/i);
   assertNoVisibleMarkdownRoleRegressions(markdown);
+  assertNoColorTraceabilityRegressions(markdown);
+});
+
+test('contrato tabla de colores: markdown usa roleDeterminingUse, no sample dominante incoherente', () => {
+  const markdown = buildDesignContextMarkdown(baseSnapshot({
+    colors: {
+      colors: [
+        {
+          value: '#000000',
+          count: 12,
+          suggestedRole: 'inverse_surface',
+          displayRole: 'superficie inversa (inverse_surface)',
+          roleConfidence: 'medium',
+          roleReason: 'BackgroundColor oscuro mapea a superficie inversa, no a acción primaria.',
+          sample: { selector: 'span', property: 'color' },
+          dominantUse: { selector: 'span', property: 'color' },
+          roleDeterminingUse: { selector: 'footer', property: 'backgroundColor' }
+        },
+        {
+          value: '#111111',
+          count: 6,
+          suggestedRole: 'shadow',
+          displayRole: 'sombra (shadow)',
+          roleConfidence: 'medium',
+          roleReason: 'Propiedad CSS boxShadow/textShadow mapea a sombra.',
+          sample: { selector: 'footer', property: 'backgroundColor' },
+          dominantUse: { selector: 'footer', property: 'backgroundColor' },
+          roleDeterminingUse: { selector: 'div.card', property: 'boxShadow' }
+        },
+        {
+          value: '#ffffff',
+          count: 8,
+          suggestedRole: 'inverse_button_surface',
+          displayRole: 'superficie de botón inverso (inverse_button_surface)',
+          roleConfidence: 'medium',
+          roleReason: 'BackgroundColor claro en botón inverso/secundario mapea a superficie de botón, no a primario.',
+          sample: { selector: 'header', property: 'backgroundColor' },
+          dominantUse: { selector: 'header', property: 'backgroundColor' },
+          roleDeterminingUse: { selector: 'a.btn.inverse', property: 'backgroundColor' }
+        }
+      ],
+      cssVariables: [],
+      totalUniqueColors: 3
+    }
+  }));
+
+  assert.match(markdown, /#000000\s*\|\s*12\s*\|\s*superficie inversa \(inverse_surface\)[^\n]*backgroundColor en footer/);
+  assert.match(markdown, /#111111\s*\|\s*6\s*\|\s*sombra \(shadow\)[^\n]*boxShadow en div\.card/);
+  assert.match(markdown, /#ffffff\s*\|\s*8\s*\|\s*superficie de botón inverso \(inverse_button_surface\)[^\n]*backgroundColor en a\.btn\.inverse/);
+  assertNoColorTraceabilityRegressions(markdown);
 });
 
 test('contrato ecommerce_category: listado de producto no hereda copy de landing ni app', () => {
@@ -338,10 +390,10 @@ function contractColors() {
       {
         value: '#ffffff',
         count: 24,
-        suggestedRole: 'surface',
-        displayRole: 'superficie (surface)',
+        suggestedRole: 'inverse_button_surface',
+        displayRole: 'superficie de botón inverso (inverse_button_surface)',
         roleConfidence: 'medium',
-        roleReason: 'BackgroundColor neutro/claro mapea a superficie.',
+        roleReason: 'BackgroundColor claro en botón inverso/secundario mapea a superficie de botón, no a primario.',
         sample: { selector: 'a.btn.inverse', property: 'backgroundColor' },
         usages: [{ selector: 'a.btn.inverse', property: 'backgroundColor' }]
       },
@@ -519,4 +571,21 @@ function assertNoVisibleMarkdownRoleRegressions(markdown) {
   assert.doesNotMatch(markdown, /#000000\s*\|\s*\d+\s*\|\s*primario \(primary\)/i);
   assert.doesNotMatch(markdown, /#000000\s*\|\s*\d+\s*\|\s*aviso \(warning\)/i);
   assert.doesNotMatch(markdown, /Non-destructive alert component is warning evidence/i);
+}
+
+function assertNoColorTraceabilityRegressions(markdown) {
+  const colorRows = markdown.split('\n').filter(line => /^\| #[0-9a-f]{6}/i.test(line));
+  for (const row of colorRows) {
+    const cells = row.split('|').map(cell => cell.trim());
+    const role = cells[3] || '';
+    const observedUse = cells[5] || '';
+    const reason = cells[6] || '';
+
+    assert.ok(!(role === 'superficie inversa (inverse_surface)' && /boxShadow|textShadow/i.test(observedUse)), row);
+    assert.ok(!(/^color en/i.test(observedUse) && /BackgroundColor/i.test(reason)), row);
+    assert.ok(!(role === 'superficie de botón inverso (inverse_button_surface)' && /backgroundColor en header/i.test(observedUse)), row);
+    if (/#000000/i.test(cells[1]) && /boxShadow|textShadow/i.test(observedUse)) {
+      assert.equal(role, 'sombra (shadow)', row);
+    }
+  }
 }

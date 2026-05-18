@@ -69,10 +69,15 @@ export function collectColors(root = document.body, options = {}) {
   const colors = topFromMap(userFacingColorUsage, limit).map(item => {
     const contexts = colorContexts.get(item.value) || [];
     const role = classifyColorUsage({ value: item.value, count: item.count, contexts, cssVariables });
-    const sample = sampleForRole(item.value, role, contexts, userFacingColorSamples, colorSamples);
+    const dominantUse = dominantUseFor(item.value, contexts, userFacingColorSamples, colorSamples);
+    const roleDeterminingUse = roleDeterminingUseFor(item.value, role, contexts, dominantUse, colorSamples);
+    const observedUse = roleDeterminingUse || dominantUse;
     return {
       ...item,
-      sample,
+      sample: observedUse,
+      dominantUse,
+      roleDeterminingUse,
+      observedUse,
       usages: contexts.slice(0, 8),
       suggestedRole: role.role,
       displayRole: role.displayRole,
@@ -86,9 +91,15 @@ export function collectColors(root = document.body, options = {}) {
     .map(item => {
       const contexts = colorContexts.get(item.value) || [];
       const role = classifyColorUsage({ value: item.value, count: item.count, contexts, cssVariables });
+      const dominantUse = dominantUseFor(item.value, contexts, undefined, colorSamples);
+      const roleDeterminingUse = roleDeterminingUseFor(item.value, role, contexts, dominantUse, colorSamples);
+      const observedUse = roleDeterminingUse || dominantUse;
       return {
         ...item,
-        sample: colorSamples.get(item.value),
+        sample: observedUse,
+        dominantUse,
+        roleDeterminingUse,
+        observedUse,
         usages: contexts.filter(context => context.isSystemOrHidden).slice(0, 4),
         suggestedRole: role.role,
         displayRole: role.displayRole,
@@ -365,31 +376,46 @@ export function classifyColorUsage(colorUsage = {}) {
   return baseRole;
 }
 
-function sampleForRole(value, roleInfo, contexts, userFacingColorSamples, colorSamples) {
+function dominantUseFor(value, contexts, userFacingColorSamples, colorSamples) {
+  return userFacingColorSamples?.get(value) || colorSamples?.get(value) || contextToUse(contexts[0]);
+}
+
+function roleDeterminingUseFor(value, roleInfo, contexts, fallbackUse, colorSamples) {
   const normalizedRole = roleInfo.role;
   const source = roleInfo.source;
   const relevantContexts = contexts.filter(context => context.isUserFacing);
-  const match = relevantContexts.find(context => {
-    const property = normalizeCssProperty(context.property);
-    if (source === 'cta_context') return property === 'backgroundcolor' && context.appearsInCta;
-    if (normalizedRole === 'surface') return property === 'backgroundcolor';
-    if (normalizedRole === 'text') return property === 'color';
-    if (normalizedRole === 'border') return property.includes('border');
-    if (normalizedRole === 'focus') return property === 'outline' || property === 'outlinecolor';
-    if (normalizedRole === 'shadow') return property === 'boxshadow' || property === 'textshadow';
-    if (['error', 'success', 'warning', 'info'].includes(normalizedRole)) return context.semanticContext === normalizedRole;
-    return true;
-  });
+  const match = relevantContexts.find(context => roleUseMatchesContext(normalizedRole, source, context));
+  if (match) return contextToUse(match);
 
-  if (match) {
-    return {
-      selector: match.selector,
-      property: match.property,
-      context: match
-    };
+  const anyMatch = contexts.find(context => roleUseMatchesContext(normalizedRole, source, context));
+  if (anyMatch) return contextToUse(anyMatch);
+
+  return fallbackUse || colorSamples?.get(value);
+}
+
+function roleUseMatchesContext(roleName, source, context = {}) {
+  const property = normalizeCssProperty(context.property);
+  if (source === 'cta_context' || roleName === 'primary') return property === 'backgroundcolor' && context.appearsInCta;
+  if (['surface', 'inverse_surface', 'brand_surface'].includes(roleName)) return property === 'backgroundcolor';
+  if (roleName === 'inverse_button_surface' || roleName === 'button_secondary_surface') {
+    return property === 'backgroundcolor' && context.componentType === 'button' && isInverseOrSecondarySurfaceContext(context);
   }
+  if (roleName === 'text') return property === 'color';
+  if (roleName === 'border') return property.includes('border');
+  if (roleName === 'focus') return property === 'outline' || property === 'outlinecolor';
+  if (roleName === 'shadow') return property === 'boxshadow' || property === 'textshadow';
+  if (roleName === 'warning') return context.semanticContext === 'warning' && property !== 'color';
+  if (['error', 'success', 'info'].includes(roleName)) return context.semanticContext === roleName;
+  return true;
+}
 
-  return userFacingColorSamples.get(value) || colorSamples.get(value);
+function contextToUse(context = {}) {
+  if (!context) return undefined;
+  return {
+    selector: context.selector,
+    property: context.property,
+    context
+  };
 }
 
 function role(roleName, confidence, reason, source = 'fallback') {
@@ -408,14 +434,17 @@ function baseRoleFromCssProperty(hex, count, contexts, variableHints, metrics) {
   const properties = contexts.map(context => context.property);
   const hasProperty = matcher => properties.some(property => matcher(normalizeCssProperty(property)));
 
-  if (hasProperty(property => property === 'backgroundcolor') && contexts.some(context => context.region === 'footer') && isDarkNeutral(hex, luminance, saturation)) {
-    return role('inverse_surface', 'medium', 'BackgroundColor oscuro en footer mapea a superficie inversa, no a acción primaria.', 'base_css_property');
+  if (hasProperty(property => property === 'backgroundcolor') && isDarkNeutral(hex, luminance, saturation)) {
+    if (contexts.some(context => context.region === 'footer')) {
+      return role('inverse_surface', 'medium', 'BackgroundColor oscuro en footer mapea a superficie inversa, no a acción primaria.', 'base_css_property');
+    }
+    return role('inverse_surface', 'medium', 'BackgroundColor oscuro mapea a superficie inversa, no a acción primaria.', 'base_css_property');
   }
   if (hasProperty(property => property === 'backgroundcolor') && contexts.some(context => context.componentType === 'button' && isInverseOrSecondarySurfaceContext(context)) && (luminance > 0.92 || isNeutralHex(hex))) {
     return role('inverse_button_surface', 'medium', 'BackgroundColor claro en botón inverso/secundario mapea a superficie de botón, no a primario.', 'base_css_property');
   }
   if (hasProperty(property => property === 'backgroundcolor') && contexts.some(context => ['header', 'nav'].includes(context.region)) && (luminance > 0.92 || isNeutralHex(hex))) {
-    return role('surface', 'medium', 'BackgroundColor neutro/claro en header/nav mapea a superficie.', 'base_css_property');
+    return role('surface', 'medium', 'BackgroundColor claro en header/nav mapea a superficie.', 'base_css_property');
   }
   if (hasProperty(property => property === 'backgroundcolor') && (luminance > 0.92 || isNeutralHex(hex))) {
     return role('surface', 'medium', 'BackgroundColor neutro/claro mapea a superficie.', 'base_css_property');
