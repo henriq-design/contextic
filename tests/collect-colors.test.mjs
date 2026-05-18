@@ -17,10 +17,21 @@ class FakeElement {
       opacity: '1',
       color: 'transparent',
       backgroundColor: 'transparent',
+      borderColor: 'transparent',
       borderTopColor: 'transparent',
       borderRightColor: 'transparent',
       borderBottomColor: 'transparent',
       borderLeftColor: 'transparent',
+      borderTopWidth: '0px',
+      borderRightWidth: '0px',
+      borderBottomWidth: '0px',
+      borderLeftWidth: '0px',
+      borderTopStyle: 'none',
+      borderRightStyle: 'none',
+      borderBottomStyle: 'none',
+      borderLeftStyle: 'none',
+      outlineWidth: '0px',
+      outlineStyle: 'none',
       outlineColor: 'transparent',
       boxShadow: 'none',
       textShadow: 'none',
@@ -460,7 +471,7 @@ test('active navigation border is not classified as success', () => {
       tree('li', {
         text: 'Dashboard',
         className: 'active nav-item',
-        style: { borderBottomColor: '#dee2e6' }
+        style: { borderBottomColor: '#dee2e6', borderBottomWidth: '1px', borderBottomStyle: 'solid' }
       })
     ])
   ]);
@@ -514,7 +525,7 @@ test('grey borderTopColor is classified as border', () => {
     tree('main', {}, [
       tree('div', {
         className: 'panel',
-        style: { borderTopColor: '#333333' }
+        style: { borderTopColor: '#333333', borderTopWidth: '1px', borderTopStyle: 'solid' }
       })
     ])
   ]);
@@ -651,7 +662,7 @@ test('exported color rows satisfy role and observedUse invariants', () => {
       }),
       tree('div', {
         className: 'panel-border',
-        style: { borderTopColor: '#333333' }
+        style: { borderTopColor: '#333333', borderTopWidth: '1px', borderTopStyle: 'solid' }
       }),
       tree('div', {
         text: 'Aviso',
@@ -668,6 +679,108 @@ test('exported color rows satisfy role and observedUse invariants', () => {
     assert.equal(color.observedUse, color.roleDeterminingUse, `observedUse must be roleDeterminingUse for ${color.value}`);
     assertColorRoleInvariant(color);
   }
+});
+
+test('computed borderColor with zero border width is incidental and text wins', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('a', {
+        text: 'Enlace de navegación',
+        className: 'nav-link',
+        attributes: { href: '/seccion' },
+        style: {
+          color: '#0d6efd',
+          borderColor: '#0d6efd',
+          borderTopColor: '#0d6efd',
+          borderRightColor: '#0d6efd',
+          borderBottomColor: '#0d6efd',
+          borderLeftColor: '#0d6efd'
+        }
+      })
+    ])
+  ]);
+
+  const blue = collectColors(root).colors.find(color => color.value === '#0d6efd');
+
+  assert.ok(blue);
+  assert.equal(blue.suggestedRole, 'text');
+  assert.equal(blue.observedUse.property, 'color');
+  assert.notEqual(blue.suggestedRole, 'border');
+});
+
+test('visible borderColor with width and style can be border', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('div', {
+        className: 'outlined-panel',
+        style: {
+          borderTopColor: '#8c8c8c',
+          borderTopWidth: '1px',
+          borderTopStyle: 'solid'
+        }
+      })
+    ])
+  ]);
+
+  const grey = collectColors(root).colors.find(color => color.value === '#8c8c8c');
+
+  assert.ok(grey);
+  assert.equal(grey.suggestedRole, 'border');
+  assert.equal(grey.observedUse.property, 'borderTopColor');
+});
+
+test('warning badge uses warning background, not incidental dark border or text', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('div', {
+        text: 'Pendiente',
+        className: 'badge bg-warning',
+        style: {
+          backgroundColor: '#ffc602',
+          color: '#3f3f3f',
+          borderColor: '#3f3f3f',
+          borderTopColor: '#3f3f3f',
+          borderRightColor: '#3f3f3f',
+          borderBottomColor: '#3f3f3f',
+          borderLeftColor: '#3f3f3f'
+        }
+      })
+    ])
+  ]);
+
+  const yellow = collectColors(root).colors.find(color => color.value === '#ffc602');
+  const dark = collectColors(root).colors.find(color => color.value === '#3f3f3f');
+
+  assert.ok(yellow);
+  assert.equal(yellow.suggestedRole, 'warning');
+  assert.equal(yellow.observedUse.property, 'backgroundColor');
+  assert.ok(dark);
+  assert.equal(dark.suggestedRole, 'text');
+  assert.equal(dark.observedUse.property, 'color');
+  assert.notEqual(dark.suggestedRole, 'warning');
+  assert.notEqual(dark.suggestedRole, 'border');
+});
+
+test('bg-warning visible border can be warning only when border itself is visible', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('div', {
+        text: 'Pendiente',
+        className: 'badge bg-warning',
+        style: {
+          borderTopColor: '#ffc602',
+          borderTopWidth: '1px',
+          borderTopStyle: 'solid'
+        }
+      })
+    ])
+  ]);
+
+  const yellow = collectColors(root).colors.find(color => color.value === '#ffc602');
+
+  assert.ok(yellow);
+  assert.equal(yellow.suggestedRole, 'warning');
+  assert.equal(yellow.observedUse.property, 'borderTopColor');
 });
 
 function tree(tag, options = {}, children = []) {

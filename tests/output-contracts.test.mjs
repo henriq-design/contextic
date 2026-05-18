@@ -579,6 +579,14 @@ function assertNoColorTraceabilityRegressions(markdown) {
   assert.doesNotMatch(markdown, /#0d0d0d.*superficie \(surface\).*BackgroundColor neutro\/claro/i);
   assert.doesNotMatch(markdown, /\|\s*#[0-9a-f]{6}.*\|\s*color en .*?\|\s*BackgroundColor/i);
   assert.doesNotMatch(markdown, /\|\s*#[0-9a-f]{6}.*\|\s*boxShadow en .*?\|\s*BackgroundColor/i);
+  assert.doesNotMatch(markdown, /#333333\s*\|\s*\d+\s*\|\s*borde \(border\).*?\|\s*borderColor en header/i);
+  assert.doesNotMatch(markdown, /#262626\s*\|\s*\d+\s*\|\s*borde \(border\).*?\|\s*borderColor en a\.aa-footer/i);
+  assert.doesNotMatch(markdown, /#8c8c8c\s*\|\s*\d+\s*\|\s*borde \(border\).*?\|\s*borderColor en div\.description/i);
+  assert.doesNotMatch(markdown, /#1a1a1a\s*\|\s*\d+\s*\|\s*borde \(border\).*?\|\s*borderColor en div\.h2/i);
+  assert.doesNotMatch(markdown, /#4d4d4d\s*\|\s*\d+\s*\|\s*borde \(border\).*?\|\s*borderColor en div\.dynamic-wrapper/i);
+  assert.doesNotMatch(markdown, /#3f3f3f\s*\|\s*\d+\s*\|\s*aviso \(warning\).*?\|\s*borderColor en div\.badge\.bg-warning/i);
+  assert.doesNotMatch(markdown, /#0d6efd\s*\|\s*\d+\s*\|\s*borde \(border\).*?\|\s*borderColor en a\.nav-link/i);
+  assert.doesNotMatch(markdown, /#404040\s*\|\s*\d+\s*\|\s*borde \(border\).*?\|\s*borderColor en span\.idioma-Number/i);
 
   const colorRows = markdown.split('\n').filter(line => /^\| #[0-9a-f]{6}/i.test(line));
   for (const row of colorRows) {

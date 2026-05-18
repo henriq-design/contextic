@@ -39,12 +39,13 @@ export function collectColors(root = document.body, options = {}) {
         if (seenPropertyColors.has(usageKey)) continue;
         seenPropertyColors.add(usageKey);
 
-        const context = buildColorContext(element, property);
+        const context = buildColorContext(element, property, style);
 
         // Los fondos y colores de texto suelen ser más relevantes que bordes repetidos por defecto.
         const weight = ['backgroundColor', 'background-color', 'color'].includes(property) ? 2 : 1;
         incrementMap(colorUsage, normalized, weight);
-        incrementMap(context.isUserFacing ? userFacingColorUsage : systemColorUsage, normalized, weight);
+        if (context.isUserFacing && context.isVisualEvidence) incrementMap(userFacingColorUsage, normalized, weight);
+        else incrementMap(systemColorUsage, normalized, weight);
         if (!colorContexts.has(normalized)) colorContexts.set(normalized, []);
         colorContexts.get(normalized).push(context);
 
@@ -55,7 +56,7 @@ export function collectColors(root = document.body, options = {}) {
             context
           });
         }
-        if (context.isUserFacing && !userFacingColorSamples.has(normalized)) {
+        if (context.isUserFacing && context.isVisualEvidence && !userFacingColorSamples.has(normalized)) {
           userFacingColorSamples.set(normalized, {
             selector: readableSelector(element),
             property,
@@ -138,7 +139,40 @@ function readableSelector(element) {
   return `${element.tagName.toLowerCase()}${id}${classes}` || element.tagName.toLowerCase();
 }
 
-function buildColorContext(element, property) {
+function visualEvidenceForProperty(element, style, property, context = {}) {
+  const normalized = normalizeCssProperty(property);
+  if (normalized === 'color' || normalized === 'backgroundcolor') {
+    return { visible: true, quality: 'visible', reason: 'Direct visible CSS color property.' };
+  }
+  if (normalized === 'boxshadow' || normalized === 'textshadow') {
+    const raw = style[property] || style.getPropertyValue?.(property) || '';
+    const visible = raw && raw !== 'none' && extractColors(raw).length > 0;
+    return {
+      visible,
+      quality: visible ? 'visible_shadow' : 'incidental_computed_style',
+      reason: visible ? 'Shadow declaration contains a color.' : 'Shadow is none or has no color.'
+    };
+  }
+  if (normalized === 'outline' || normalized === 'outlinecolor') {
+    const visible = isVisibleOutline(style) && (context.interactive || ['focus', 'current', 'selected'].includes(context.stateContext));
+    return {
+      visible,
+      quality: visible ? 'visible_outline' : 'incidental_computed_style',
+      reason: visible ? 'Outline has visible style/width on an interactive or focused element.' : 'Outline is not visibly rendered for this element.'
+    };
+  }
+  if (normalized.includes('border')) {
+    const visible = isVisibleBorderForProperty(style, property);
+    return {
+      visible,
+      quality: visible ? 'visible_border' : 'incidental_computed_style',
+      reason: visible ? 'Border has visible style and width.' : 'Computed border color without visible border width/style.'
+    };
+  }
+  return { visible: true, quality: 'visible', reason: 'Visible CSS property.' };
+}
+
+function buildColorContext(element, property, style = window.getComputedStyle(element)) {
   const selector = readableSelector(element);
   const region = classifyElementRegion(element);
   const componentType = inferComponentType(element);
@@ -149,6 +183,7 @@ function buildColorContext(element, property) {
   const interactive = isInteractive(element);
   const appearsInCta = interactive && isMainAction(element);
   const semanticContext = semanticRoleFromContext(element, { componentType, region, stateContext });
+  const visualEvidence = visualEvidenceForProperty(element, style, property, { interactive, stateContext });
 
   return {
     property,
@@ -163,6 +198,9 @@ function buildColorContext(element, property) {
     isSystemOrHidden,
     interactive,
     appearsInCta,
+    isVisualEvidence: visualEvidence.visible,
+    evidenceQuality: visualEvidence.quality,
+    evidenceReason: visualEvidence.reason,
     semanticContext: semanticContext.role,
     semanticReason: semanticContext.reason
   };
@@ -357,7 +395,11 @@ export function classifyColorUsage(colorUsage = {}) {
   }
 
   const metrics = { luminance, saturation };
-  const candidates = relevantContexts.map((context, index) => {
+  const candidateContexts = relevantContexts.filter(context => context.isVisualEvidence);
+  const contextsForCandidates = candidateContexts.length
+    ? candidateContexts
+    : relevantContexts.filter(context => normalizeCssProperty(context.property) === 'color');
+  const candidates = contextsForCandidates.map((context, index) => {
     const roleInfo = roleFromSingleUse(hex, count, context, variableHints, metrics);
     return { ...roleInfo, index };
   });
@@ -377,17 +419,17 @@ function roleFromSingleUse(hex, count, context = {}, variableHints = [], metrics
   const use = contextToUse(context);
 
   if (property === 'boxshadow' || property === 'textshadow') {
-    return role('shadow', 'medium', 'Propiedad CSS boxShadow/textShadow mapea a sombra.', 'base_css_property', use, 60);
+    return role('shadow', 'medium', 'Propiedad CSS boxShadow/textShadow mapea a sombra.', 'base_css_property', use, 35);
   }
 
   if (property.includes('border')) {
     const semantic = semanticRoleForVisualUse(context, variableHints);
     if (semantic.role !== 'none') return role(semantic.role, semantic.confidence, semantic.reason, 'semantic_component', use, semantic.priority);
-    return role('border', saturation < 0.25 ? 'medium' : 'low', 'Propiedad CSS de borde mapea a borde.', 'base_css_property', use, 50);
+    return role('border', saturation < 0.25 ? 'medium' : 'low', 'Propiedad CSS de borde mapea a borde.', 'base_css_property', use, 30);
   }
 
   if (property === 'outline' || property === 'outlinecolor') {
-    return role('focus', 'medium', 'Propiedad CSS outline/outlineColor mapea a foco.', 'base_css_property', use, 48);
+    return role('focus', 'medium', 'Propiedad CSS outline/outlineColor mapea a foco.', 'base_css_property', use, 32);
   }
 
   if (property === 'backgroundcolor') {
@@ -545,6 +587,35 @@ function isNeutralActionSurface(hex, contexts, metrics = {}) {
   if (luminance > 0.92) return true;
   if (neutral && /\b(inverse|secondary|tertiary|ghost|outline|nav|navigation|header)\b/.test(descriptor)) return true;
   return false;
+}
+
+function isVisibleBorderForProperty(style, property) {
+  const normalized = normalizeCssProperty(property);
+  if (normalized === 'bordercolor') {
+    return ['Top', 'Right', 'Bottom', 'Left'].some(side => isVisibleBorderSide(style, side));
+  }
+  if (normalized === 'bordertopcolor') return isVisibleBorderSide(style, 'Top');
+  if (normalized === 'borderrightcolor') return isVisibleBorderSide(style, 'Right');
+  if (normalized === 'borderbottomcolor') return isVisibleBorderSide(style, 'Bottom');
+  if (normalized === 'borderleftcolor') return isVisibleBorderSide(style, 'Left');
+  return false;
+}
+
+function isVisibleBorderSide(style, side) {
+  const width = cssPixelValue(style[`border${side}Width`] || style.getPropertyValue?.(`border-${side.toLowerCase()}-width`));
+  const borderStyle = String(style[`border${side}Style`] || style.getPropertyValue?.(`border-${side.toLowerCase()}-style`) || '').toLowerCase();
+  return width > 0 && borderStyle && !['none', 'hidden'].includes(borderStyle);
+}
+
+function isVisibleOutline(style) {
+  const width = cssPixelValue(style.outlineWidth || style.getPropertyValue?.('outline-width'));
+  const outlineStyle = String(style.outlineStyle || style.getPropertyValue?.('outline-style') || '').toLowerCase();
+  return width > 0 && outlineStyle && !['none', 'hidden'].includes(outlineStyle);
+}
+
+function cssPixelValue(value) {
+  const number = Number.parseFloat(String(value || '0'));
+  return Number.isFinite(number) ? number : 0;
 }
 
 function normalizeCssProperty(property) {
