@@ -463,7 +463,7 @@ function buildExecutiveSummary({ findings = [], findingGroups = {}, hypotheses =
         : `- No se detectan fricciones UX de alta confianza; se recomiendan ${appReviewCount} revisiones de app y ${accessibilityReviewCount} revisiones de accesibilidad.`,
       `- Revisiones de app recomendadas: ${appReviewCount}.`,
       `- Revisiones de accesibilidad recomendadas: ${accessibilityReviewCount}.`,
-      '- No se generan hipótesis de conversión para dashboards/apps.',
+      '- No se generan hipótesis CRO para dashboards/apps.',
       reviewTasks[0]
         ? `- Tarea principal de revisión: ${reviewTasks[0].question}`
         : '- No se generó tarea de revisión.'
@@ -970,6 +970,13 @@ function buildPatternList(components, behavioralMapping, pageClassification = {}
   const patterns = [];
   const counts = components.counts || {};
   const isAppReview = pageClassification.archetype === 'dashboard_or_app' || pageClassification.analysisMode === 'app_usability_review' || pageClassification.reviewModel === 'dashboard_app';
+  if (pageClassification.reviewModel === 'home_portal' || ['home_or_portal', 'education_portal', 'content_portal', 'corporate_home', 'marketing_home'].includes(pageClassification.archetype)) {
+    if (counts.navigation) patterns.push('- Navegación de portal');
+    if (counts.cards >= 3) patterns.push('- Módulos/rutas de contenido');
+    if (counts.ctaGroups || counts.buttons) patterns.push('- Acciones de ruta o acceso');
+    if (counts.forms || counts.inputs) patterns.push('- Búsqueda o acceso a catálogo');
+    return patterns.join('\n') || '- No se detectan patrones UI suficientes por heurística.';
+  }
   if (pageClassification.archetype === 'ecommerce_category') {
     if (counts.navigation) patterns.push('- Navegación de categoría');
     if (counts.cards >= 3) patterns.push('- Cards/listado de producto');
@@ -1087,6 +1094,9 @@ function buildManualReviewSummary(reviewTasks = [], pageClassification = {}) {
   if (pageClassification.archetype === 'dashboard_or_app' || pageClassification.analysisMode === 'app_usability_review' || pageClassification.reviewModel === 'dashboard_app') {
     return buildAppManualReviewSummary(reviewTasks);
   }
+  if (pageClassification.reviewModel === 'home_portal' || ['home_or_portal', 'education_portal', 'content_portal', 'corporate_home', 'marketing_home'].includes(pageClassification.archetype)) {
+    return buildPortalManualReviewSummary(reviewTasks);
+  }
   const items = uniqueReviewTasks(reviewTasks).map(task => `- [${reviewTaskTag(task)}] ${reviewTaskSummary(task)}`);
   return items.join('\n') || '- No hay señales de revisión ligera con la evidencia actual.';
 }
@@ -1105,6 +1115,25 @@ function buildAppManualReviewSummary(reviewTasks = []) {
     if (area === 'cta_group') lines.push('- [Acciones] Validar jerarquía primaria/secundaria y acción esperada.');
   }
   return lines.join('\n') || '- No hay revisiones de app recomendadas con la evidencia actual.';
+}
+
+function buildPortalManualReviewSummary(reviewTasks = []) {
+  const lines = [];
+  const seen = new Set();
+  for (const task of reviewTasks) {
+    const text = `${task.question || ''} ${(task.evidence || []).join(' ')}`.toLowerCase();
+    const area = /docentes|familias|estudiantes|centros|audiencias/.test(text)
+      ? 'Audiencias/rutas'
+      : /orientaci[oó]n principal|contenido|cat[aá]logo|recursos|institucional/.test(text)
+        ? 'Orientación'
+        : /jerarqu[ií]a de acciones|rutas principales|buscador/.test(text)
+          ? 'Rutas/acciones'
+          : 'Revisión';
+    if (seen.has(area)) continue;
+    seen.add(area);
+    lines.push(`- [${area}] ${task.question || 'Validar la señal de portal antes de proponer cambios.'}`);
+  }
+  return lines.join('\n') || '- No hay revisiones de portal recomendadas con la evidencia actual.';
 }
 
 function buildDesignSystemDebtSummary(findings = []) {

@@ -26,10 +26,24 @@ test('contrato service_landing: Vodafone mantiene matriz behavioral y no usa rev
   assert.match(markdown, /Arquetipo: service_landing/);
   assert.match(markdown, /Modo de análisis: full_behavioral/);
   assert.match(markdown, /### Mapa de bloques behavioral/);
+  assert.match(markdown, /Qué \(what\)/);
+  assert.match(markdown, /Por qué \(why\)/);
+  assert.match(markdown, /Por qué no \(why_not\)/);
+  assert.match(markdown, /Para quién \(who\)/);
+  assert.match(markdown, /Cómo \(how\)/);
+  assert.match(markdown, /Dónde actuar \(where\)/);
+  assert.match(markdown, /Cuándo \/ Urgencia \(when\)/);
+  assert.match(markdown, /Asegura tu móvil/);
+  assert.match(markdown, /Tarea principal de revisión[\s\S]*¿El CTA principal ‘Asegura tu móvil’ coincide con el objetivo real de la página\?/);
+  assert.match(markdown, /Señales de revisión ligera: Para quién, Dónde actuar/);
   assert.match(markdown, /\[Dónde actuar \/ where\]/);
   assert.match(markdown, /Hipótesis principal/);
   assert.doesNotMatch(markdown, /app_usability_review|dashboard_or_app|dashboard_app/);
   assert.doesNotMatch(markdown, /Revisiones de app recomendadas|Cards\/listado|No se generan recomendaciones de conversión para dashboards\/apps/);
+  assert.doesNotMatch(markdown, /education_portal|#0d0d0d\s*\|\s*\d+\s*\|\s*(aviso|warning)/i);
+  assert.doesNotMatch(markdown, /#ffffff\s*\|\s*\d+\s*\|\s*(primario|primary)/i);
+  assert.doesNotMatch(markdown, /#000000\s*\|\s*\d+\s*\|\s*(primario|primary)/i);
+  assert.doesNotMatch(markdown, /Semantic state overrides|primario \(primary\): #ffffff/i);
 });
 
 test('contrato education_portal: Anaya pública no se convierte en dashboard por widget externo', () => {
@@ -43,8 +57,8 @@ test('contrato education_portal: Anaya pública no se convierte en dashboard por
       'button accessibility-tab-button accessibility widget panel configuración toolbar --bmv-primary --bmv-contrast'
     ].join(' '),
     components: {
-      counts: { buttons: 2, cards: 6, ctaGroups: 0, forms: 0 },
-      samples: { buttons: [{ text: 'Buscar en catálogo' }, { text: 'Acceso docentes' }], ctaGroups: [] }
+      counts: { buttons: 2, cards: 6, ctaGroups: 1, forms: 0 },
+      samples: { buttons: [{ text: 'Buscar en catálogo' }, { text: 'Acceso docentes' }], ctaGroups: [{ actions: ['Buscar en catálogo', 'Acceso docentes'] }] }
     },
     presenceOfHero: true
   });
@@ -56,11 +70,17 @@ test('contrato education_portal: Anaya pública no se convierte en dashboard por
   assert.equal(json.pageClassification.analysisMode, 'limited_behavioral');
   assert.match(markdown, /Arquetipo: education_portal/);
   assert.match(markdown, /Validar si la home permite diferenciar rápidamente rutas para docentes, familias\/estudiantes y centros/);
+  assert.match(markdown, /¿La home deja clara la orientación principal: contenido, catálogo, recursos o acceso institucional\?/);
+  assert.match(markdown, /¿La jerarquía de acciones diferencia rutas principales sin competir como CTAs de conversión\?/);
   assert.match(markdown, /Widgets\/utilidades externas detectadas/);
+  assert.match(markdown, /accessibility_widget/);
   assert.match(markdown, /button#accessibility-tab-button/);
   assert.match(markdown, /--bmv-primary/);
+  assert.doesNotMatch(markdown.split('### Variables CSS detectadas')[1].split('### Ruido visual de sistema/oculto')[0], /--bmv-/);
   assert.doesNotMatch(markdown, /app_usability_review|dashboard_app|Validar densidad, agrupación, jerarquía y estados de las cards del dashboard/);
   assert.doesNotMatch(markdown, /Revisiones de app recomendadas|No se generan recomendaciones de conversión para dashboards\/apps/);
+  assert.doesNotMatch(markdown, /\[Dónde actuar \/ where\]|CTA principal responde al objetivo de negocio|#000000\s*\|\s*\d+\s*\|\s*(aviso|warning)/i);
+  assert.doesNotMatch(markdown, /#ffffff\s*\|\s*\d+\s*\|\s*(primario|primary).*a\.btn\.inverse/i);
 });
 
 test('contrato dashboard_or_app: Anaya private usa revisión app sin bloques landing', () => {
@@ -85,8 +105,14 @@ test('contrato dashboard_or_app: Anaya private usa revisión app sin bloques lan
   assert.match(markdown, /\[Cards\/listado\]/);
   assert.match(markdown, /\[Badges\/status\]/);
   assert.match(markdown, /\[Formulario\]/);
+  assert.match(markdown, /\[Navegación\]/);
+  assert.match(markdown, /\[Acciones\]/);
   assert.doesNotMatch(markdown, /\[Cómo \/ how\]|\[Dónde actuar \/ where\]/);
-  assert.doesNotMatch(markdown, /Cards de beneficios o features|Hipótesis principal|CTR del CTA principal/);
+  assert.doesNotMatch(markdown, /full_behavioral|service_landing|Cards de beneficios o features|Hipótesis principal|CTR del CTA principal/);
+  assert.doesNotMatch(markdown, /¿La señal/);
+  assert.doesNotMatch(markdown, /Test: Weak block/i);
+  assert.doesNotMatch(markdown, /Hipótesis de conversión/i);
+  assert.doesNotMatch(markdown, /A\/B test/i);
 });
 
 test('contrato ecommerce_category: listado de producto no hereda copy de landing ni app', () => {
@@ -163,6 +189,7 @@ function serviceLandingSnapshot(pageClassification) {
     pageClassification,
     components: componentFixture({ buttons: 2, forms: 1, inputs: 2, cards: 4, ctaGroups: 1 }),
     behavioralMapping: behavioralLandingMap(),
+    colors: contractColors(),
     frictions: [ctaFriction()],
     behavioralRecommendation: { sections: [] }
   });
@@ -178,17 +205,17 @@ function educationPortalSnapshot(pageClassification) {
     },
     pageClassification,
     components: {
-      ...componentFixture({ buttons: 2, cards: 6 }),
+      ...componentFixture({ buttons: 2, cards: 6, ctaGroups: 1 }),
       systemUtilityWidgets: [
         {
           selector: 'button#accessibility-tab-button.accessibility-tab-button',
-          kind: 'accessibility_widget',
+          type: 'accessibility_widget',
           reason: 'Widget externo de accesibilidad detectado.'
         }
       ]
     },
     colors: {
-      ...baseColors(),
+      ...contractColors(),
       cssVariables: [{ name: '--bmv-primary', value: '#000000', usage: 'third-party/accessibility-widget usage', systemUtility: true }],
       systemHiddenVisualNoise: [{ value: '#000000', count: 12, reason: 'Color procedente de accessibility_widget/system_utility.' }]
     },
@@ -295,6 +322,55 @@ function baseColors() {
   };
 }
 
+function contractColors() {
+  return {
+    colors: [
+      {
+        value: '#0d0d0d',
+        count: 40,
+        suggestedRole: 'text',
+        displayRole: 'texto (text)',
+        roleConfidence: 'high',
+        roleReason: 'Propiedad CSS color mapea a texto; sin evidencia semántica fuerte localizada.',
+        sample: { selector: 'body', property: 'color' },
+        usages: [{ selector: 'body', property: 'color' }]
+      },
+      {
+        value: '#ffffff',
+        count: 24,
+        suggestedRole: 'surface',
+        displayRole: 'superficie (surface)',
+        roleConfidence: 'medium',
+        roleReason: 'BackgroundColor neutro/claro mapea a superficie.',
+        sample: { selector: 'a.btn.inverse', property: 'backgroundColor' },
+        usages: [{ selector: 'a.btn.inverse', property: 'backgroundColor' }]
+      },
+      {
+        value: '#000000',
+        count: 10,
+        suggestedRole: 'surface',
+        displayRole: 'superficie (surface)',
+        roleConfidence: 'medium',
+        roleReason: 'BackgroundColor neutro mapea a superficie.',
+        sample: { selector: 'footer', property: 'backgroundColor' },
+        usages: [{ selector: 'footer', property: 'backgroundColor' }]
+      },
+      {
+        value: '#e60000',
+        count: 8,
+        suggestedRole: 'primary',
+        displayRole: 'primario (primary)',
+        roleConfidence: 'medium',
+        roleReason: 'BackgroundColor en CTA visible mapea a primario.',
+        sample: { selector: 'a.primary.cta', property: 'backgroundColor' },
+        usages: [{ selector: 'a.primary.cta', property: 'backgroundColor' }]
+      }
+    ],
+    cssVariables: [{ name: '--color-primary', value: '#e60000', usageStatus: 'used visible' }],
+    totalUniqueColors: 4
+  };
+}
+
 function componentFixture(counts = {}) {
   return {
     counts: {
@@ -327,19 +403,90 @@ function componentFixture(counts = {}) {
 function behavioralLandingMap() {
   return [
     {
+      block: 'what',
+      label: 'What',
+      displayLabel: 'Qué',
+      present: 'sí',
+      quality: 4,
+      confidence: 'high',
+      evidence: ['Propuesta de servicio Vodafone Care visible.'],
+      missing: [],
+      severity: 0
+    },
+    {
+      block: 'why',
+      label: 'Why',
+      displayLabel: 'Por qué',
+      present: 'sí',
+      quality: 4,
+      confidence: 'high',
+      evidence: ['Beneficios del soporte y cuidado del servicio visibles.'],
+      missing: [],
+      severity: 0
+    },
+    {
+      block: 'why_not',
+      label: 'Why not',
+      displayLabel: 'Por qué no',
+      present: 'sí',
+      quality: 4,
+      confidence: 'high',
+      evidence: ['Preguntas frecuentes y objeciones visibles.'],
+      missing: [],
+      severity: 0
+    },
+    {
+      block: 'who',
+      label: 'Who',
+      displayLabel: 'Para quién',
+      present: 'parcial',
+      quality: 3,
+      confidence: 'medium',
+      evidence: ['Target funcional detectado en caso de uso: “para tu móvil”.'],
+      missing: ['Validar si el target funcional necesita traducirse a segmento comercial.'],
+      severity: 1
+    },
+    {
+      block: 'how',
+      label: 'How',
+      displayLabel: 'Cómo',
+      present: 'sí',
+      quality: 4,
+      confidence: 'high',
+      evidence: ['Se explica el proceso de alta y soporte.'],
+      missing: [],
+      severity: 0
+    },
+    {
       block: 'where',
       label: 'Where',
       displayLabel: 'Dónde actuar',
       present: 'sí',
       quality: 3,
       confidence: 'medium',
-      evidence: ['CTA principal visible en hero: “Solicitar información”.'],
+      evidence: ['CTA principal visible en hero: “Asegura tu móvil”.'],
       missing: ['Validar si el CTA coincide con el objetivo real de la página.'],
+      diagnostics: {
+        ctaAssessment: {
+          primary: { cleanLabel: 'Asegura tu móvil', label: 'Asegura tu móvil', region: 'hero' }
+        }
+      },
       frictionType: 'baja_accionabilidad',
       detectedFriction: 'Acciones primarias compitiendo',
       severity: 4,
       recommendation: 'Mantener una acción primaria.',
       metrics: ['CTR del CTA principal']
+    },
+    {
+      block: 'when',
+      label: 'When',
+      displayLabel: 'Cuándo / Urgencia',
+      present: 'sí',
+      quality: 4,
+      confidence: 'high',
+      evidence: ['Se explican condiciones y límites temporales sin urgencia artificial.'],
+      missing: [],
+      severity: 0
     }
   ];
 }

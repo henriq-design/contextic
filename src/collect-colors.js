@@ -344,7 +344,7 @@ export function classifyColorUsage(colorUsage = {}) {
 
   if (!relevantContexts.length) return role('utility', 'low', 'Solo observado en contextos ocultos, de sistema o utilidad.', 'base_css_property');
 
-  if (isActionColor(relevantContexts)) {
+  if (isActionColor(relevantContexts) && !isNeutralActionSurface(hex, relevantContexts, { luminance })) {
     return role('primary', variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) ? 'high' : 'medium', variableHints.some(name => /\b(brand|primary|main)\b/.test(name)) ? 'Variable brand/primary usada como fondo de una acción principal visible.' : 'Usado como backgroundColor en un CTA o acción principal visible.', 'cta_context');
   }
 
@@ -492,6 +492,15 @@ function hasExplicitSemanticTokenVariable(variableHints = []) {
 
 function isActionColor(contexts) {
   return contexts.some(context => context.appearsInCta && normalizeCssProperty(context.property) === 'backgroundcolor');
+}
+
+function isNeutralActionSurface(hex, contexts, metrics = {}) {
+  const descriptor = contexts.map(context => `${context.selector || ''} ${context.componentType || ''} ${context.stateContext || ''}`).join(' ').toLowerCase();
+  const luminance = Number(metrics.luminance || 0);
+  const neutral = isNeutralHex(hex);
+  if (luminance > 0.92) return true;
+  if (neutral && /\b(inverse|secondary|tertiary|ghost|outline|nav|navigation|header)\b/.test(descriptor)) return true;
+  return false;
 }
 
 function normalizeCssProperty(property) {

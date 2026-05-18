@@ -210,6 +210,26 @@ test('black text inside warning component remains text, not warning', () => {
   assert.notEqual(black.suggestedRole, 'warning');
 });
 
+test('visible text in sticky alert banner is not warning without semantic token', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('div', {
+        text: 'Mensaje informativo persistente',
+        className: 'sticky alert banner',
+        role: 'alert',
+        style: { color: '#0d0d0d', backgroundColor: '#ffffff' }
+      })
+    ])
+  ]);
+
+  const black = collectColors(root).colors.find(color => color.value === '#0d0d0d');
+
+  assert.ok(black);
+  assert.equal(black.sample.property, 'color');
+  assert.equal(black.suggestedRole, 'text');
+  assert.notEqual(black.suggestedRole, 'warning');
+});
+
 test('explicit warning component background is classified as warning', () => {
   const root = tree('body', {}, [
     tree('main', {}, [
@@ -349,6 +369,45 @@ test('white background samples are not explained as text color usage', () => {
   assert.equal(white.sample.property, 'backgroundColor');
   assert.notEqual(white.suggestedRole, 'text');
   assert.doesNotMatch(white.roleReason, /color mapea a texto/i);
+});
+
+test('white inverse button background is surface, not primary', () => {
+  const root = tree('body', {}, [
+    tree('main', {}, [
+      tree('a', {
+        text: 'Volver',
+        className: 'btn inverse',
+        attributes: { href: '/inicio' },
+        style: { backgroundColor: '#ffffff', color: '#111111' }
+      })
+    ])
+  ]);
+
+  const white = collectColors(root).colors.find(color => color.value === '#ffffff');
+
+  assert.ok(white);
+  assert.equal(white.sample.property, 'backgroundColor');
+  assert.equal(white.suggestedRole, 'surface');
+  assert.notEqual(white.suggestedRole, 'primary');
+});
+
+test('black footer background is surface, not primary', () => {
+  const root = tree('body', {}, [
+    tree('footer', {}, [
+      tree('div', {
+        text: 'Footer institucional',
+        className: 'footer-shell',
+        style: { backgroundColor: '#000000', color: '#ffffff' }
+      })
+    ])
+  ]);
+
+  const black = collectColors(root).colors.find(color => color.value === '#000000');
+
+  assert.ok(black);
+  assert.equal(black.sample.property, 'backgroundColor');
+  assert.equal(black.suggestedRole, 'surface');
+  assert.notEqual(black.suggestedRole, 'primary');
 });
 
 test('yellow text alone is not inferred as primary', () => {
